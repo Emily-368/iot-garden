@@ -35,6 +35,8 @@ const bool COMMON_ANODE = false;
 // Temperature thresholds in degrees C
 const float HOT_THRESHOLD  = 30.0;   // at or above -> red
 const float COOL_THRESHOLD = 24.0;   // below -> blue, otherwise green
+const float TEMP_OFFSET = +10.0;     // Temperature sensor is 10 degree less than what should
+
 
 // Moisture calibration (raw analog values).
 // Read the Serial Monitor with the probe in dry air, then in a glass of water,
@@ -67,7 +69,7 @@ float readTemperatureC(int &raw) {
   double logR = log(resistance);
   double kelvin = 1.0 / (0.001129148 +
                          (0.000234125 + 0.0000000876741 * logR * logR) * logR);
-  return kelvin - 273.15;
+  return kelvin - 273.15 + TEMP_OFFSET;
 }
 
 // Convert the moisture reading to 0-100 %
