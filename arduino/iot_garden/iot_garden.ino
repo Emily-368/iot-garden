@@ -96,9 +96,9 @@ void updateLed(float tempC) {
   if (tempC >= HOT_THRESHOLD) {
     setColor(255, 0, 0);        // red - hot
   } else if (tempC >= COOL_THRESHOLD) {
-    setColor(0, 255, 0);        // green - ideal
-  } else {
     setColor(0, 0, 255);        // blue - cool
+  } else {
+    setColor(0, 255, 0);        // green - ideal
   }
 }
 
