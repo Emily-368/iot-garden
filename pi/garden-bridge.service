@@ -1,0 +1,25 @@
+# Template: update.sh fills in CHANGE_ME_USER and CHANGE_ME_DIR when it installs
+# this to /etc/systemd/system/. Don't edit the placeholders here.
+#
+# Pi-specific settings (serial port, MQTT broker/password) go in
+# /etc/default/garden-bridge, not in this file, so they never end up on GitHub.
+# Example contents:
+#   GARDEN_SERIAL_PORT=/dev/ttyUSB0
+#   GARDEN_MQTT_HOST=192.168.1.50
+
+[Unit]
+Description=IoT Garden bridge (Arduino serial to MQTT and web dashboard)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+User=CHANGE_ME_USER
+WorkingDirectory=CHANGE_ME_DIR
+ExecStart=CHANGE_ME_DIR/venv/bin/python CHANGE_ME_DIR/pi/garden_bridge.py
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/default/garden-bridge
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

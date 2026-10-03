@@ -1,0 +1,12 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Garden data (stays on the Pi, never committed)
+*.db
+*.db-wal
+*.db-shm
+
+# Arduino build output
+build/
