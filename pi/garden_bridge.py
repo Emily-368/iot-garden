@@ -4,7 +4,11 @@ IoT Garden bridge for Raspberry Pi
 ==================================
 
 Reads JSON lines from the Arduino over USB serial, e.g.
-    {"temp_c":25.3,"moisture_pct":45,"temp_raw":512,"moisture_raw":400}
+    {"temp_c":25.3,"moisture_pct":45,"water":"ok","water_below":30,
+     "wet_above":80,"temp_raw":512,"moisture_raw":400}
+
+Watering status ("dry", "ok", "wet") and its thresholds come from the Arduino,
+set in arduino/iot_garden/calibration.h, so there is one place to calibrate.
 
 and then:
   - keeps the latest reading in memory
@@ -60,6 +64,8 @@ STALE_AFTER_S = 30       # dashboard warns if no data for this long
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("garden")
+
+WATER_LABELS = {"dry": "Needs watering", "ok": "Okay", "wet": "Too wet"}
 
 latest = {}
 latest_lock = threading.Lock()
@@ -132,18 +138,18 @@ class MqttPublisher:
             "model": "Arduino Uno + Raspberry Pi 4B",
         }
         sensors = [
-            ("temperature", "Temperature", "temp_c", "°C", "temperature"),
-            ("moisture", "Soil moisture", "moisture_pct", "%", "moisture"),
+            ("temperature", "temp_c", {"name": "Temperature", "unit_of_measurement": "°C",
+                                       "device_class": "temperature", "state_class": "measurement"}),
+            ("moisture", "moisture_pct", {"name": "Soil moisture", "unit_of_measurement": "%",
+                                          "device_class": "moisture", "state_class": "measurement"}),
+            ("watering", "water_status", {"name": "Watering", "icon": "mdi:watering-can"}),
         ]
-        for key, name, field, unit, device_class in sensors:
+        for key, field, extra in sensors:
             config = {
-                "name": name,
+                **extra,
                 "unique_id": f"iot_garden_{key}",
                 "state_topic": f"{MQTT_BASE}/state",
                 "value_template": f"{{{{ value_json.{field} }}}}",
-                "unit_of_measurement": unit,
-                "device_class": device_class,
-                "state_class": "measurement",
                 "availability_topic": f"{MQTT_BASE}/status",
                 "device": device,
             }
@@ -189,10 +195,17 @@ def serial_loop(publisher):
                         continue
 
                     now = int(time.time())
+                    water = data.get("water")
+                    if water not in WATER_LABELS:
+                        water = None   # older sketch without watering status
                     reading = {
                         "ts": now,
                         "temp_c": round(float(data["temp_c"]), 1),
                         "moisture_pct": round(float(data["moisture_pct"])),
+                        "water": water,
+                        "water_status": WATER_LABELS.get(water, "Unknown"),
+                        "water_below": data.get("water_below"),
+                        "wet_above": data.get("wet_above"),
                         "temp_raw": data.get("temp_raw"),
                         "moisture_raw": data.get("moisture_raw"),
                     }
@@ -271,14 +284,14 @@ DASHBOARD_HTML = r"""<!doctype html>
 :root {
   --bg: #e9eee6; --panel: #f8faf6; --ink: #1c261c; --muted: #5a6657; --grid: #d3dbcd;
   --hot: #c23b2b; --ideal: #2e8547; --cool: #2d5fb3;
-  --soil: #7a5a3f; --water: #2b7889; --temp-line: #b5562a; --warn: #9a6512;
+  --soil: #7a5a3f; --water: #2b7889; --temp-line: #b5562a; --warn: #9a6512; --dry: #b8650f;
   --on-band: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #121612; --panel: #1b211b; --ink: #e5eae1; --muted: #93a08f; --grid: #2b342b;
     --hot: #d9503f; --ideal: #3a9a57; --cool: #4073c7;
-    --soil: #a07d5e; --water: #4aaabd; --temp-line: #e0834f; --warn: #e2a74a;
+    --soil: #a07d5e; --water: #4aaabd; --temp-line: #e0834f; --warn: #e2a74a; --dry: #e8963c;
   }
 }
 * { box-sizing: border-box; }
@@ -315,7 +328,31 @@ h1 { font-size: 1.2rem; margin: 0; }
   opacity: .9;
 }
 .soil > div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--water); transition: width .8s ease; }
+.soil > i { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; opacity: .85; display: none; }
+.scale { position: relative; height: 1.2em; font-size: .75rem; color: var(--muted); }
+.scale span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .hint { font-size: .85rem; color: var(--muted); margin-top: 6px; }
+
+/* Watering status */
+.water {
+  --state: var(--muted);
+  margin-top: 10px; padding: 12px 14px; border-radius: 12px;
+  border-left: 6px solid var(--state);
+  background: color-mix(in srgb, var(--state) 14%, var(--panel));
+}
+.water[data-state="dry"] { --state: var(--dry); }
+.water[data-state="ok"]  { --state: var(--ideal); }
+.water[data-state="wet"] { --state: var(--water); }
+.water strong { display: block; font-size: 1.2rem; }
+.water span { display: block; font-size: .9rem; color: var(--muted); margin-top: 2px; }
+.water[hidden] { display: none; }
+
+.raw { margin-top: 26px; font-size: .9rem; color: var(--muted); }
+.raw summary { cursor: pointer; }
+.raw summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.raw dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 10px 0 6px; }
+.raw dt { color: var(--muted); }
+.raw dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 700; }
 
 .history { margin-top: 30px; }
 .history header { margin-bottom: 8px; }
@@ -350,7 +387,12 @@ canvas { width: 100%; height: 150px; display: block; }
 
   <section class="moisture" aria-label="Soil moisture">
     <div class="row"><h2>Soil moisture</h2><strong><b id="moist">--</b><span>%</span></strong></div>
-    <div class="soil" aria-hidden="true"><div id="moistBar"></div></div>
+    <div class="soil" aria-hidden="true"><div id="moistBar"></div><i id="dryMark"></i><i id="wetMark"></i></div>
+    <div class="scale" aria-hidden="true"><span id="dryLabel"></span><span id="wetLabel"></span></div>
+    <div class="water" id="water" role="status" hidden>
+      <strong id="waterTitle"></strong>
+      <span id="waterDetail"></span>
+    </div>
   </section>
 
   <section class="history">
@@ -363,13 +405,22 @@ canvas { width: 100%; height: 150px; display: block; }
       </div>
     </header>
     <figure><figcaption>Temperature (°C)</figcaption><canvas id="tempChart"></canvas></figure>
-    <figure><figcaption>Soil moisture (%)</figcaption><canvas id="moistChart"></canvas></figure>
+    <figure><figcaption>Soil moisture (%). Dashed lines mark the watering thresholds.</figcaption><canvas id="moistChart"></canvas></figure>
   </section>
+
+  <details class="raw">
+    <summary>Raw sensor readings</summary>
+    <dl>
+      <dt>Temperature sensor</dt><dd id="tempRaw">--</dd>
+      <dt>Moisture sensor</dt><dd id="moistRaw">--</dd>
+    </dl>
+    <p class="hint">Use these values when filling in calibration.h. They update every few seconds.</p>
+  </details>
 </main>
 
 <script>
 const HOT = __HOT__, COOL = __COOL__, STALE_AFTER = __STALE__;
-let rangeHours = 24, history = null;
+let rangeHours = 24, history = null, current = null;
 const $ = id => document.getElementById(id);
 const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -397,6 +448,10 @@ async function loadLatest() {
     $('temp').textContent = d.temp_c.toFixed(1);
     $('moist').textContent = Math.round(d.moisture_pct);
     $('moistBar').style.width = Math.max(0, Math.min(100, d.moisture_pct)) + '%';
+    current = d;
+    showWatering(d);
+    $('tempRaw').textContent = d.temp_raw ?? '--';
+    $('moistRaw').textContent = d.moisture_raw ?? '--';
     const b = band(d.temp_c);
     $('led').style.backgroundColor = cssVar(b.color);
     $('band').textContent = b.text;
@@ -408,6 +463,33 @@ async function loadLatest() {
     status.textContent = "Can't reach the Pi";
     status.classList.add('stale');
   }
+}
+
+function showWatering(d) {
+  const box = $('water');
+  const below = d.water_below, above = d.wet_above;
+  const copy = {
+    dry: ['Needs watering', `Soil is below ${below}%. Water the herbs.`],
+    ok:  ['Okay, no water needed', `Water when the soil drops below ${below}%.`],
+    wet: ['Too wet', `Soil is above ${above}%. Hold off watering until it dries out.`],
+  }[d.water];
+  if (!copy) { box.hidden = true; return; }
+  box.hidden = false;
+  box.dataset.state = d.water;
+  $('waterTitle').textContent = copy[0];
+  $('waterDetail').textContent = copy[1];
+
+  placeMark('dryMark', 'dryLabel', below, `Water below ${below}%`);
+  placeMark('wetMark', 'wetLabel', above, `Too wet above ${above}%`);
+}
+
+function placeMark(markId, labelId, pct, text) {
+  const ok = typeof pct === 'number';
+  const pos = ok ? Math.max(8, Math.min(92, pct)) : 0;
+  $(markId).style.display = ok ? 'block' : 'none';
+  $(markId).style.left = (ok ? pct : 0) + '%';
+  $(labelId).style.left = pos + '%';
+  $(labelId).textContent = ok ? text : '';
 }
 
 async function loadHistory() {
@@ -422,10 +504,11 @@ function drawAll() {
   const pts = history.points.filter(p => p[1] !== null && p[2] !== null);
   const times = pts.map(p => p[0]);
   drawChart($('tempChart'), times, pts.map(p => p[1]), cssVar('--temp-line'), 1);
-  drawChart($('moistChart'), times, pts.map(p => p[2]), cssVar('--water'), 0);
+  const guides = current ? [current.water_below, current.wet_above].filter(v => typeof v === 'number') : [];
+  drawChart($('moistChart'), times, pts.map(p => p[2]), cssVar('--water'), 0, guides);
 }
 
-function drawChart(canvas, times, values, color, decimals) {
+function drawChart(canvas, times, values, color, decimals, guides = []) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight;
   canvas.width = w * dpr; canvas.height = h * dpr;
@@ -444,7 +527,8 @@ function drawChart(canvas, times, values, color, decimals) {
     return;
   }
 
-  let min = Math.min(...values), max = Math.max(...values);
+  const all = values.concat(guides);
+  let min = Math.min(...all), max = Math.max(...all);
   if (max - min < 1) { min -= 0.5; max += 0.5; }
   const span = max - min; min -= span * 0.1; max += span * 0.1;
   const t0 = times[0], t1 = times[times.length - 1];
@@ -458,7 +542,17 @@ function drawChart(canvas, times, values, color, decimals) {
     ctx.fillText(v.toFixed(decimals), 0, yy + 4);
   }
 
-  const opts = rangeHours > 24 ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric', minute: '2-digit' };
+  if (guides.length) {
+    ctx.save();
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = muted; ctx.lineWidth = 1.5;
+    guides.forEach(g => {
+      const yy = Math.round(y(g)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(w - pad.r, yy); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  const opts = rangeHours >= 24 ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric', minute: '2-digit' };
   const fmt = t => new Date(t * 1000).toLocaleString([], opts);
   ctx.fillText(fmt(t0), pad.l, h - 4);
   const end = fmt(t1);
@@ -483,7 +577,7 @@ $('range').addEventListener('click', e => {
 window.addEventListener('resize', drawAll);
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { loadLatest(); drawAll(); });
 
-loadLatest(); loadHistory();
+loadLatest().then(loadHistory);
 setInterval(loadLatest, 5000);
 setInterval(loadHistory, 60000);
 </script>
