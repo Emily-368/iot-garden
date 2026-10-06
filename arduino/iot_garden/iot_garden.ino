@@ -34,7 +34,7 @@ const bool COMMON_ANODE = false;
 
 // Temperature thresholds in degrees C
 const float HOT_THRESHOLD  = 30.0;   // at or above -> red
-const float COOL_THRESHOLD = 24.0;   // below -> blue, otherwise green
+const float COOL_THRESHOLD = 21.0;   // below -> blue, otherwise green
 const float TEMP_OFFSET = +10.0;     // Temperature sensor is 10 degree less than what should
 
 
