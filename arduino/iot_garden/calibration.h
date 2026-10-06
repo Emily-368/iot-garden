@@ -15,7 +15,7 @@
 // Put a thermometer next to the sensor and compare it with the LCD:
 //   LCD reads 10 C too high  ->  -10.0
 //   LCD reads 10 C too low   ->   10.0
-const float TEMP_OFFSET = 0.0;
+const float TEMP_OFFSET = 10.0;
 
 // ---------------- Soil moisture sensor ----------------
 // Raw readings at each end of the scale (0 to 1023).
