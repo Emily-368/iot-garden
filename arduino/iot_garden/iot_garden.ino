@@ -37,7 +37,7 @@ const bool COMMON_ANODE = false;
 
 // Temperature thresholds for the LED in degrees C
 const float HOT_THRESHOLD  = 30.0;   // at or above -> red
-const float COOL_THRESHOLD = 24.0;   // below -> blue, otherwise green
+const float COOL_THRESHOLD = 21.0;   // below -> blue, otherwise green
 
 const int NUM_SAMPLES = 10;                    // readings averaged per update
 const unsigned long UPDATE_INTERVAL_MS = 1000; // screen/LED refresh rate
@@ -128,9 +128,9 @@ void updateLed(float tempC) {
   if (tempC >= HOT_THRESHOLD) {
     setColor(255, 0, 0);        // red - hot
   } else if (tempC >= COOL_THRESHOLD) {
-    setColor(0, 255, 0);        // green - ideal
+    setColor(0, 0, 255);        // green - ideal
   } else {
-    setColor(0, 0, 255);        // blue - cool
+    setColor(0, 255, 0);        // blue - cool
   }
 }
 
