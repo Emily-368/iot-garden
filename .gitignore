@@ -10,3 +10,6 @@ __pycache__/
 
 # Arduino build output
 build/
+
+# PCB design files stay local, not in this repo
+pcb/

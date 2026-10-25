@@ -1,0 +1,9 @@
+# Normalise line endings. Files that run or get compiled on the Pi must stay LF
+# even when checked out on Windows (core.autocrlf=true).
+* text=auto
+*.sh      text eol=lf
+*.py      text eol=lf
+*.service text eol=lf
+*.txt     text eol=lf
+*.ino     text eol=lf
+*.h       text eol=lf
