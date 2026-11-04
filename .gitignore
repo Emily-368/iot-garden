@@ -16,3 +16,6 @@ pcb/
 
 # macOS
 .DS_Store
+
+# ESP32 Wi-Fi and MQTT passwords
+esp32/**/secrets.h

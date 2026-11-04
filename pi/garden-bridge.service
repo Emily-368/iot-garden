@@ -4,6 +4,7 @@
 # Pi-specific settings (serial port, MQTT broker/password) go in
 # /etc/default/garden-bridge, not in this file, so they never end up on GitHub.
 # Example contents:
+#   GARDEN_INPUT=mqtt   (read the ESP32 over MQTT instead of the Uno over USB)
 #   GARDEN_SERIAL_PORT=/dev/ttyUSB0
 #   GARDEN_MQTT_HOST=192.168.1.50
 

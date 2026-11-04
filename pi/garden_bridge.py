@@ -3,12 +3,16 @@
 IoT Garden bridge for Raspberry Pi
 ==================================
 
-Reads JSON lines from the Arduino over USB serial, e.g.
+Receives JSON readings from the garden sensor board, e.g.
     {"temp_c":25.3,"moisture_pct":45,"water":"ok","water_below":30,
      "wet_above":80,"temp_raw":512,"moisture_raw":400}
 
-Watering status ("dry", "ok", "wet") and its thresholds come from the Arduino,
-set in arduino/iot_garden/calibration.h, so there is one place to calibrate.
+GARDEN_INPUT picks where they come from:
+  - serial (default): the Arduino Uno over USB
+  - mqtt: the XIAO ESP32-C6 over Wi-Fi, on topic garden/esp32/reading
+
+Watering status ("dry", "ok", "wet") and its thresholds come from the sensor
+board, set in its calibration.h, so there is one place to calibrate.
 
 and then:
   - keeps the latest reading in memory
@@ -36,7 +40,9 @@ except ImportError:  # MQTT is optional
     mqtt = None
 
 # ---------------- CONFIG ----------------
-SERIAL_PORT = os.environ.get("GARDEN_SERIAL_PORT", "/dev/ttyACM0")
+INPUT_MQTT = os.environ.get("GARDEN_INPUT", "serial") == "mqtt"
+
+SERIAL_PORT =os.environ.get("GARDEN_SERIAL_PORT", "/dev/ttyACM0")
 SERIAL_BAUD = int(os.environ.get("GARDEN_SERIAL_BAUD", "9600"))
 
 DB_PATH = Path(os.environ.get("GARDEN_DB", Path(__file__).resolve().parent / "garden.db"))
@@ -49,6 +55,7 @@ MQTT_PORT = int(os.environ.get("GARDEN_MQTT_PORT", "1883"))
 MQTT_USER = os.environ.get("GARDEN_MQTT_USER")
 MQTT_PASS = os.environ.get("GARDEN_MQTT_PASS")
 MQTT_BASE = "garden"
+MQTT_READING_TOPIC = f"{MQTT_BASE}/esp32/reading"
 MQTT_INTERVAL_S = 10     # how often the state is published
 HA_DISCOVERY_PREFIX = "homeassistant"
 
@@ -59,7 +66,9 @@ WEB_PORT = int(os.environ.get("GARDEN_WEB_PORT", "5000"))
 HOT_THRESHOLD = 30.0
 COOL_THRESHOLD = 24.0
 
-STALE_AFTER_S = 30       # dashboard warns if no data for this long
+# Dashboard warns if no data for this long. The ESP32 sends every 10 minutes,
+# so this allows for one missed reading before warning.
+STALE_AFTER_S = 1500 if INPUT_MQTT else 30
 # ----------------------------------------
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -69,6 +78,8 @@ WATER_LABELS = {"dry": "Needs watering", "ok": "Okay", "wet": "Too wet"}
 
 latest = {}
 latest_lock = threading.Lock()
+last_logged = 0
+last_published = 0
 
 
 # ---------------- Database ----------------
@@ -129,6 +140,21 @@ class MqttPublisher:
         log.info("MQTT connected to %s:%s", MQTT_HOST, MQTT_PORT)
         client.publish(f"{MQTT_BASE}/status", "online", retain=True)
         self._publish_discovery(client)
+        if INPUT_MQTT:
+            client.message_callback_add(MQTT_READING_TOPIC, self._on_reading)
+            client.subscribe(MQTT_READING_TOPIC)
+            log.info("Listening for readings on %s", MQTT_READING_TOPIC)
+
+    def _on_reading(self, client, userdata, message):
+        # An exception here would stop the MQTT thread, so never let one escape
+        try:
+            data = parse_line(message.payload.decode("utf-8", errors="ignore").strip())
+            if data is None:
+                log.warning("Ignored invalid reading on %s", message.topic)
+                return
+            handle_reading(data, self)
+        except Exception:
+            log.exception("Unexpected error handling an MQTT reading")
 
     def _publish_discovery(self, client):
         """Lets Home Assistant create the sensors automatically (ignored if you don't use HA)."""
@@ -165,9 +191,9 @@ class MqttPublisher:
         self.client.publish(f"{MQTT_BASE}/state", json.dumps(reading), retain=True)
 
 
-# ---------------- Serial ----------------
+# ---------------- Readings ----------------
 def parse_line(line):
-    """Return a dict if the line is a valid reading from the Arduino, else None."""
+    """Return a dict if the line is a valid reading from the sensor board, else None."""
     if not line.startswith("{"):
         return None
     try:
@@ -179,9 +205,42 @@ def parse_line(line):
     return data
 
 
+def handle_reading(data, publisher):
+    """Store a valid reading, then log and publish it if they are due."""
+    global last_logged, last_published
+
+    now = int(time.time())
+    water = data.get("water")
+    if water not in WATER_LABELS:
+        water = None   # older sketch without watering status
+    reading = {
+        "ts": now,
+        "temp_c": round(float(data["temp_c"]), 1),
+        "moisture_pct": round(float(data["moisture_pct"])),
+        "water": water,
+        "water_status": WATER_LABELS.get(water, "Unknown"),
+        "water_below": data.get("water_below"),
+        "wet_above": data.get("wet_above"),
+        "temp_raw": data.get("temp_raw"),
+        "moisture_raw": data.get("moisture_raw"),
+    }
+    with latest_lock:
+        latest.clear()
+        latest.update(reading)
+
+    if now - last_logged >= LOG_INTERVAL_S:
+        try:
+            db_insert(reading)
+            last_logged = now
+        except sqlite3.Error as exc:
+            log.warning("Database write failed: %s", exc)
+
+    if now - last_published >= MQTT_INTERVAL_S:
+        publisher.publish_state(reading)
+        last_published = now
+
+
 def serial_loop(publisher):
-    last_logged = 0
-    last_published = 0
     while True:
         try:
             log.info("Opening serial port %s", SERIAL_PORT)
@@ -193,36 +252,7 @@ def serial_loop(publisher):
                     data = parse_line(raw.decode("utf-8", errors="ignore").strip())
                     if data is None:
                         continue
-
-                    now = int(time.time())
-                    water = data.get("water")
-                    if water not in WATER_LABELS:
-                        water = None   # older sketch without watering status
-                    reading = {
-                        "ts": now,
-                        "temp_c": round(float(data["temp_c"]), 1),
-                        "moisture_pct": round(float(data["moisture_pct"])),
-                        "water": water,
-                        "water_status": WATER_LABELS.get(water, "Unknown"),
-                        "water_below": data.get("water_below"),
-                        "wet_above": data.get("wet_above"),
-                        "temp_raw": data.get("temp_raw"),
-                        "moisture_raw": data.get("moisture_raw"),
-                    }
-                    with latest_lock:
-                        latest.clear()
-                        latest.update(reading)
-
-                    if now - last_logged >= LOG_INTERVAL_S:
-                        try:
-                            db_insert(reading)
-                            last_logged = now
-                        except sqlite3.Error as exc:
-                            log.warning("Database write failed: %s", exc)
-
-                    if now - last_published >= MQTT_INTERVAL_S:
-                        publisher.publish_state(reading)
-                        last_published = now
+                    handle_reading(data, publisher)
 
         except serial.SerialException as exc:
             log.warning("Serial error: %s (retrying in 5 s)", exc)
@@ -412,7 +442,7 @@ canvas { width: 100%; height: 150px; display: block; }
       <dt>Temperature sensor</dt><dd id="tempRaw">--</dd>
       <dt>Moisture sensor</dt><dd id="moistRaw">--</dd>
     </dl>
-    <p class="hint">Use these values when filling in calibration.h. They update every few seconds.</p>
+    <p class="hint">Use these values when filling in calibration.h. They update with each new reading.</p>
   </details>
 </main>
 
@@ -439,7 +469,7 @@ async function loadLatest() {
   try {
     const d = await (await fetch('api/latest', { cache: 'no-store' })).json();
     if (d.ts === undefined) {
-      status.textContent = 'No readings yet. Check the Arduino USB cable.';
+      status.textContent = 'No readings yet. Check the garden sensor.';
       status.classList.add('stale');
       return;
     }
@@ -454,7 +484,7 @@ async function loadLatest() {
 
     const stale = d.age_s > STALE_AFTER;
     status.classList.toggle('stale', stale);
-    status.textContent = stale ? `Last reading ${ago(d.age_s)} ago. Check the Arduino.` : `Updated ${ago(d.age_s)} ago`;
+    status.textContent = stale ? `Last reading ${ago(d.age_s)} ago. Check the garden sensor.` : `Updated ${ago(d.age_s)} ago`;
   } catch (e) {
     status.textContent = "Can't reach the Pi";
     status.classList.add('stale');
@@ -519,7 +549,7 @@ function drawChart(canvas, times, values, color, decimals, guides = []) {
 
   if (values.length < 2) {
     ctx.fillStyle = muted;
-    ctx.fillText('The chart fills in as readings are logged (one per minute).', 4, h / 2);
+    ctx.fillText('The chart fills in as readings are logged.', 4, h / 2);
     return;
   }
 
@@ -591,7 +621,10 @@ DASHBOARD_HTML = (
 def main():
     db_init()
     publisher = MqttPublisher()
-    threading.Thread(target=serial_loop, args=(publisher,), daemon=True).start()
+    if not INPUT_MQTT:
+        threading.Thread(target=serial_loop, args=(publisher,), daemon=True).start()
+    elif publisher.client is None:
+        log.error("GARDEN_INPUT=mqtt needs MQTT enabled and paho-mqtt installed; no readings will arrive")
     log.info("Dashboard running on port %s", WEB_PORT)
     app.run(host=WEB_HOST, port=WEB_PORT, threaded=True)
 

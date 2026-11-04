@@ -6,7 +6,8 @@ Arduino over USB, logs the data, publishes it to MQTT and serves a phone dashboa
 ```
 arduino/iot_garden/iot_garden.ino   Arduino sketch
 arduino/iot_garden/calibration.h    Calibration values and watering thresholds
-pi/garden_bridge.py                 Serial -> SQLite + MQTT + web dashboard
+esp32/iot_garden_esp32/             Planned XIAO ESP32-C6 sketch (not deployed yet)
+pi/garden_bridge.py                 Serial or MQTT -> SQLite + MQTT + web dashboard
 pi/garden-bridge.service            systemd template (installed by update.sh)
 pi/requirements.txt                 Python packages for the Pi
 update.sh                           Run on the Pi to pull and apply changes

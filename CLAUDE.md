@@ -20,7 +20,8 @@ Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
 |---|---|
 | `arduino/iot_garden/iot_garden.ino` | Sketch. Folder name must match the .ino name (Arduino rule). |
 | `arduino/iot_garden/calibration.h` | All calibration values and watering thresholds. Edit here, not in the sketch. |
-| `pi/garden_bridge.py` | Serial reader, SQLite logger, MQTT publisher and dashboard (HTML/CSS/JS embedded in `DASHBOARD_HTML`). |
+| `esp32/iot_garden_esp32/` | Sketch for the planned XIAO ESP32-C6 move (Wi-Fi/MQTT, deep sleep). Not deployed yet. Set `GARDEN_INPUT=mqtt` on the Pi to switch the bridge to it. Passwords go in `secrets.h`, which Git ignores. |
+| `pi/garden_bridge.py` | Serial or MQTT reading input (`GARDEN_INPUT`, default `serial`), SQLite logger, MQTT publisher and dashboard (HTML/CSS/JS embedded in `DASHBOARD_HTML`). |
 | `pi/garden-bridge.service` | systemd template. `CHANGE_ME_USER` / `CHANGE_ME_DIR` are filled in by `update.sh`. Don't hardcode them. |
 | `pi/requirements.txt` | pyserial, paho-mqtt (2.x callback API), flask |
 | `update.sh` | Run on the Pi: pulls, then only reinstalls/reflashes/restarts what changed. `--all` forces everything. |
@@ -49,7 +50,8 @@ One JSON object per line, once a second:
 ```
 - `water` is `"dry"`, `"ok"` or `"wet"`, decided on the Arduino with hysteresis (`MOISTURE_HYSTERESIS`).
 - The bridge ignores any line that isn't JSON with numeric `temp_c` and `moisture_pct`.
-- If the protocol changes, update `parse_line()`, the `reading` dict in `serial_loop()`, the dashboard JS and the HA discovery config together.
+- The ESP32 sketch sends the same JSON to MQTT topic `garden/esp32/reading`, with raw values in millivolts, every 10 minutes.
+- If the protocol changes, update `parse_line()`, the `reading` dict in `handle_reading()`, the dashboard JS and the HA discovery config together.
 
 ## Dashboard API (bridge)
 
@@ -72,7 +74,7 @@ Keep `WEB_HOST = "0.0.0.0"` so both LAN and tailnet access work.
   (FQBN `arduino:avr:uno`) after stopping the bridge to free the port.
 - Pi-specific settings go in `/etc/default/garden-bridge` on the Pi (e.g. `GARDEN_SERIAL_PORT`,
   `GARDEN_MQTT_HOST/USER/PASS`), never in the repo.
-- Mosquitto runs locally on the Pi. Home Assistant is not installed yet (planned option: Docker container,
+- Mosquitto runs locally on the Pi. For the ESP32 it needs a network listener and login; keep it LAN/tailnet only and never port-forward it. Home Assistant is not installed yet (planned option: Docker container,
   not HA OS). The bridge already sends HA MQTT auto-discovery for temperature, moisture and watering status.
 
 ## Workflow
