@@ -24,7 +24,7 @@ Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
 | `pi/garden-bridge.service` | systemd template. `CHANGE_ME_USER` / `CHANGE_ME_DIR` are filled in by `update.sh`. Don't hardcode them. |
 | `pi/requirements.txt` | pyserial, paho-mqtt (2.x callback API), flask |
 | `update.sh` | Run on the Pi: pulls, then only reinstalls/reflashes/restarts what changed. `--all` forces everything. |
-| `.gitattributes` | Forces LF endings for code/scripts so files work on the Pi (Emily's Git has `core.autocrlf=true`). |
+| `.gitattributes` | Forces LF endings for code/scripts so files work on the Pi, including from any Windows checkout with `core.autocrlf=true`. |
 
 ## Hardware
 
@@ -79,18 +79,18 @@ Keep `WEB_HOST = "0.0.0.0"` so both LAN and tailnet access work.
 
 ## Workflow
 
-1. Edit on Emily's Windows PC (repo in `C:\Users\emily\OneDrive\Documents\Projects\iot-garden`, VS Code).
+1. Edit on Emily's Mac (repo in `~/Documents/IoT-Garden Monitor`). Pushes to GitHub over HTTPS using the macOS keychain login.
 2. Commit and push to `main`.
-3. On the Pi: `bash ~/iot-garden/update.sh`
+3. On the Pi: `bash ~/iot-garden/update.sh` (from the Mac: `ssh raspi4@ras-4 'bash ~/iot-garden/update.sh'`, which needs Tailscale on the Mac)
 
 Never edit files directly on the Pi; `git pull --ff-only` will refuse if the Pi tree is dirty.
 
 ## Known gotchas
 
-- **Executable bit:** commits from Windows can drop it on `update.sh`. Fix with
+- **Executable bit:** commits made from Windows can drop it on `update.sh`. Fix with
   `git update-index --chmod=+x update.sh`, or run it as `bash update.sh`.
-- **Divergent branches:** happened once. Emily's global git config now uses `pull.rebase true`. Never force-push.
-- **OneDrive:** the repo lives in OneDrive; occasional lock/conflict-copy issues are possible.
+- **Divergent branches:** happened once. Use `pull.rebase true` (set per repo on the Mac clone, as `git config --local pull.rebase true`). Never force-push.
+- **Failed updates:** if `update.sh` fails after pulling (e.g. during a flash), the next run says "Already up to date" and skips the rest. Recover with `update.sh --all`.
 - **Serial port:** default `/dev/ttyACM0`; clone boards may be `/dev/ttyUSB0`. User must be in `dialout`.
 - Opening the serial port resets the Uno, so the LCD splash shows on every bridge restart. Expected.
 - Use `mkdir -p` before installers that write into `~/.local/bin`.

@@ -13,3 +13,6 @@ build/
 
 # PCB design files stay local, not in this repo
 pcb/
+
+# macOS
+.DS_Store
