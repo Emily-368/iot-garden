@@ -3,11 +3,6 @@
   ------------------
   - Reads Keyestudio KS0033 analog temperature sensor (10k NTC thermistor) on A0
   - Reads Keyestudio soil moisture sensor on A1
-  - Displays temperature, soil moisture and watering status on a 16x2 LCD
-  - Sets the RGB LED colour by temperature band:
-        temp >= 30 C         -> RED
-        24 C <= temp < 30 C  -> GREEN
-        temp < 24 C          -> BLUE
   - Sends one JSON line per update over USB serial (9600 baud) for the
     Raspberry Pi bridge, e.g.
     {"temp_c":25.3,"moisture_pct":45,"water":"ok","water_below":30,
@@ -16,31 +11,16 @@
   Sensor calibration and watering thresholds are in calibration.h.
 */
 
-#include <LiquidCrystal.h>
 #include <math.h>
 #include "calibration.h"
 
 // ---------------- Pins ----------------
-const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-
 const int sensorPin   = A0;   // temperature sensor
 const int moisturePin = A1;   // soil moisture sensor
-const int redPin   = 9;       // PWM
-const int greenPin = 10;      // PWM
-const int bluePin  = 6;       // PWM
 
 // ---------------- Settings ----------------
-// Set to true if your RGB LED is common ANODE (common leg to 5V).
-// Leave false for common CATHODE (common leg to GND).
-const bool COMMON_ANODE = false;
-
-// Temperature thresholds for the LED in degrees C
-const float HOT_THRESHOLD  = 30.0;   // at or above -> red
-const float COOL_THRESHOLD = 24.0;   // below -> blue, otherwise green
-
 const int NUM_SAMPLES = 10;                    // readings averaged per update
-const unsigned long UPDATE_INTERVAL_MS = 1000; // screen/LED refresh rate
+const unsigned long UPDATE_INTERVAL_MS = 1000; // how often a reading is sent
 
 // Watering states
 const int WATER_OK      = 0;
@@ -104,70 +84,10 @@ const char* waterCode(int state) {
   return "ok";
 }
 
-// 5-character label for the LCD
-const char* waterLcdLabel(int state) {
-  if (state == WATER_NEEDED)  return "WATER";
-  if (state == WATER_TOO_WET) return "WET  ";
-  return "OK   ";
-}
-
-// Set LED colour (0-255 per channel)
-void setColor(int r, int g, int b) {
-  if (COMMON_ANODE) {
-    r = 255 - r;
-    g = 255 - g;
-    b = 255 - b;
-  }
-  analogWrite(redPin, r);
-  analogWrite(greenPin, g);
-  analogWrite(bluePin, b);
-}
-
-// Pick LED colour from temperature
-void updateLed(float tempC) {
-  if (tempC >= HOT_THRESHOLD) {
-    setColor(255, 0, 0);        // red - hot
-  } else if (tempC >= COOL_THRESHOLD) {
-    setColor(0, 255, 0);        // green - ideal
-  } else {
-    setColor(0, 0, 255);        // blue - cool
-  }
-}
-
-// Write values to the LCD (trailing spaces clear leftover characters)
-//   Line 1: "Temp:  25.3°C"
-//   Line 2: "Soil: 45%  OK"  /  "Soil: 22%  WATER"
-void updateLcd(float tempC, int moisturePct, int state) {
-  lcd.setCursor(0, 0);
-  lcd.print("Temp:  ");
-  lcd.print(tempC, 1);
-  lcd.print((char)223);         // degree symbol
-  lcd.print("C   ");
-
-  lcd.setCursor(0, 1);
-  lcd.print("Soil: ");
-  lcd.print(moisturePct);
-  lcd.print("%     ");
-  lcd.setCursor(11, 1);
-  lcd.print(waterLcdLabel(state));
-}
-
 // ---------------- Main ----------------
 
 void setup() {
   Serial.begin(9600);
-
-  pinMode(redPin, OUTPUT);
-  pinMode(greenPin, OUTPUT);
-  pinMode(bluePin, OUTPUT);
-  setColor(0, 0, 0);
-
-  lcd.begin(16, 2);
-  lcd.print("IoT Garden");
-  lcd.setCursor(0, 1);
-  lcd.print("Starting...");
-  delay(1500);
-  lcd.clear();
 }
 
 void loop() {
@@ -178,9 +98,6 @@ void loop() {
     float tempC     = readTemperatureC(tempRaw);
     int moisturePct = readMoisturePercent(moistureRaw);
     int state       = waterState(moisturePct);
-
-    updateLcd(tempC, moisturePct, state);
-    updateLed(tempC);
 
     // One JSON line per update for the Raspberry Pi bridge
     Serial.print("{\"temp_c\":");

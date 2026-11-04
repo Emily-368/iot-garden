@@ -55,7 +55,7 @@ HA_DISCOVERY_PREFIX = "homeassistant"
 WEB_HOST = "0.0.0.0"
 WEB_PORT = int(os.environ.get("GARDEN_WEB_PORT", "5000"))
 
-# Keep these matching the Arduino sketch so the dashboard agrees with the LED
+# Temperature bands that set the colour of the dashboard's temperature panel
 HOT_THRESHOLD = 30.0
 COOL_THRESHOLD = 24.0
 
@@ -308,15 +308,14 @@ h1 { font-size: 1.2rem; margin: 0; }
 #status { font-size: .85rem; color: var(--muted); text-align: right; }
 #status.stale { color: var(--warn); font-weight: 700; }
 
-/* The one bold element: a panel lit in the same colour as the garden LED */
-#led {
+/* The one bold element: a panel coloured by the temperature band */
+#tempPanel {
   background: var(--muted); color: var(--on-band);
-  border-radius: 22px; padding: 22px 22px 20px;
+  border-radius: 22px; padding: 22px;
   transition: background-color .8s ease;
 }
-#led .reading { font-size: 4.6rem; font-weight: 700; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-#led .reading span { font-size: 1.6rem; font-weight: 400; letter-spacing: 0; margin-left: 4px; vertical-align: .9em; opacity: .85; }
-#led .band { margin-top: 10px; font-size: 1rem; opacity: .95; }
+#tempPanel .reading { font-size: 4.6rem; font-weight: 700; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+#tempPanel .reading span { font-size: 1.6rem; font-weight: 400; letter-spacing: 0; margin-left: 4px; vertical-align: .9em; opacity: .85; }
 
 .moisture { margin-top: 22px; }
 .moisture .row { display: flex; justify-content: space-between; align-items: baseline; }
@@ -369,7 +368,7 @@ figcaption { font-size: .9rem; color: var(--muted); margin-bottom: 4px; }
 canvas { width: 100%; height: 150px; display: block; }
 
 @media (prefers-reduced-motion: reduce) {
-  #led, .soil > div { transition: none; }
+  #tempPanel, .soil > div { transition: none; }
 }
 </style>
 </head>
@@ -380,9 +379,8 @@ canvas { width: 100%; height: 150px; display: block; }
     <span id="status" role="status">Connecting to the Pi…</span>
   </header>
 
-  <section id="led" aria-label="Temperature">
+  <section id="tempPanel" aria-label="Temperature">
     <div class="reading"><b id="temp">--</b><span>°C</span></div>
-    <div class="band" id="band">Waiting for the first reading</div>
   </section>
 
   <section class="moisture" aria-label="Soil moisture">
@@ -424,10 +422,10 @@ let rangeHours = 24, history = null, current = null;
 const $ = id => document.getElementById(id);
 const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-function band(t) {
-  if (t >= HOT)  return { color: '--hot',   text: `Hot, LED red (${HOT} °C or above)` };
-  if (t >= COOL) return { color: '--ideal', text: `In range, LED green (${COOL} to ${HOT} °C)` };
-  return            { color: '--cool',  text: `Cool, LED blue (below ${COOL} °C)` };
+function bandColor(t) {
+  if (t >= HOT)  return '--hot';
+  if (t >= COOL) return '--ideal';
+  return '--cool';
 }
 
 function ago(s) {
@@ -452,9 +450,7 @@ async function loadLatest() {
     showWatering(d);
     $('tempRaw').textContent = d.temp_raw ?? '--';
     $('moistRaw').textContent = d.moisture_raw ?? '--';
-    const b = band(d.temp_c);
-    $('led').style.backgroundColor = cssVar(b.color);
-    $('band').textContent = b.text;
+    $('tempPanel').style.backgroundColor = cssVar(bandColor(d.temp_c));
 
     const stale = d.age_s > STALE_AFTER;
     status.classList.toggle('stale', stale);

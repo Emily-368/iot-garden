@@ -12,9 +12,9 @@
 
 // ---------------- Temperature ----------------
 // Added to every temperature reading (degrees C).
-// Put a thermometer next to the sensor and compare it with the LCD:
-//   LCD reads 10 C too high  ->  -10.0
-//   LCD reads 10 C too low   ->   10.0
+// Put a thermometer next to the sensor and compare it with the dashboard:
+//   Dashboard reads 10 C too high  ->  -10.0
+//   Dashboard reads 10 C too low   ->   10.0
 const float TEMP_OFFSET = 10.0;
 
 // ---------------- Soil moisture sensor ----------------

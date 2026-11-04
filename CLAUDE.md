@@ -1,15 +1,15 @@
 # IoT Garden: project context for Claude Code
 
-Emily's herb garden monitor. An Arduino Uno reads temperature and soil moisture,
-shows them on an LCD and an RGB LED, and streams JSON over USB to a Raspberry Pi 4B.
+Emily's herb garden monitor. An Arduino Uno reads temperature and soil moisture
+and streams JSON over USB to a Raspberry Pi 4B.
 The Pi logs the data, publishes MQTT and serves a phone dashboard.
 
 ## Architecture
 
 ```
 Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
-                |                                                  |
-           LCD + RGB LED                     SQLite log (1 row/min, 30 days kept)
+                                                                   |
+                                             SQLite log (1 row/min, 30 days kept)
                                              MQTT (garden/state, HA auto-discovery)
                                              Flask dashboard on :5000
 ```
@@ -28,20 +28,18 @@ Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
 
 ## Hardware
 
-- Arduino Uno, 16x2 parallel LCD, RGB LED (common cathode by default, `COMMON_ANODE` flag in sketch)
+- Arduino Uno (no LCD or LED; the dashboard is the only display)
 - Keyestudio KS0033 analog temp sensor (10k NTC, Steinhart-Hart in `readTemperatureC()`) on A0
 - Keyestudio resistive soil moisture sensor on A1
 
 Pins:
 ```cpp
-const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 const int sensorPin = A0;    // temperature
 const int moisturePin = A1;  // soil moisture
-const int redPin = 9, greenPin = 10, bluePin = 6;  // PWM
 ```
 
-LED temperature bands: >= 30 C red, 24 to < 30 C green, < 24 C blue.
-`HOT_THRESHOLD` / `COOL_THRESHOLD` live in both the sketch and `garden_bridge.py`; keep them in sync.
+Dashboard temperature panel colours: >= 30 C red, 24 to < 30 C green, < 24 C blue.
+`HOT_THRESHOLD` / `COOL_THRESHOLD` live in `garden_bridge.py`.
 
 ## Serial protocol (Arduino -> Pi)
 
@@ -92,7 +90,7 @@ Never edit files directly on the Pi; `git pull --ff-only` will refuse if the Pi 
 - **Divergent branches:** happened once. Use `pull.rebase true` (set per repo on the Mac clone, as `git config --local pull.rebase true`). Never force-push.
 - **Failed updates:** if `update.sh` fails after pulling (e.g. during a flash), the next run says "Already up to date" and skips the rest. Recover with `update.sh --all`.
 - **Serial port:** default `/dev/ttyACM0`; clone boards may be `/dev/ttyUSB0`. User must be in `dialout`.
-- Opening the serial port resets the Uno, so the LCD splash shows on every bridge restart. Expected.
+- Opening the serial port resets the Uno on every bridge restart, so readings pause briefly. Expected.
 - Use `mkdir -p` before installers that write into `~/.local/bin`.
 
 ## Calibration status / open items
@@ -108,6 +106,5 @@ Never edit files directly on the Pi; `git pull --ff-only` will refuse if the Pi 
 
 - Python: `python3 -m py_compile pi/garden_bridge.py`; Flask test client against `/api/latest` and
   `/api/history` with a temp `GARDEN_DB`.
-- Sketch: `arduino-cli compile --fqbn arduino:avr:uno arduino/iot_garden` (needs the AVR core and
-  LiquidCrystal library).
+- Sketch: `arduino-cli compile --fqbn arduino:avr:uno arduino/iot_garden` (needs the AVR core).
 - `bash -n update.sh`

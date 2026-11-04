@@ -1,8 +1,7 @@
 # IoT Garden
 
-Arduino Uno reads soil moisture and temperature, shows them on an LCD and sets
-an RGB LED by temperature. A Raspberry Pi reads the Arduino over USB, logs the
-data, publishes it to MQTT and serves a phone dashboard on a web port (`GARDEN_WEB_PORT`).
+Arduino Uno reads soil moisture and temperature. A Raspberry Pi reads the
+Arduino over USB, logs the data, publishes it to MQTT and serves a phone dashboard on a web port (`GARDEN_WEB_PORT`).
 
 ```
 arduino/iot_garden/iot_garden.ino   Arduino sketch
