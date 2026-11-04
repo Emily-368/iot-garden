@@ -68,8 +68,8 @@ Keep `WEB_HOST = "0.0.0.0"` so both LAN and tailnet access work.
 
 - Pi hostname `ras-4` (`ras-4.local` on LAN, `ras-4` over Tailscale), user `raspi4`, now on Wi-Fi.
   Always use the hostname, not an IP; the IP changed when it moved from Ethernet to Wi-Fi.
-- Repo: `github.com/Emily-368/iot-garden` (private). Cloned on the Pi at `~/iot-garden`.
-- Pi pulls with a read-only deploy key: `~/.ssh/iot_garden_deploy`, SSH host alias `github-iot-garden`.
+- Repo: `github.com/Emily-368/iot-garden` (public, so never commit passwords or keys). Cloned on the Pi at `~/iot-garden`.
+- Pi pulls over HTTPS with no key: `https://github.com/Emily-368/iot-garden.git`. This stops working if the repo is made private.
 - `arduino-cli` is installed on the Pi in `~/.local/bin`; `update.sh` flashes the Uno over USB
   (FQBN `arduino:avr:uno`) after stopping the bridge to free the port.
 - Pi-specific settings go in `/etc/default/garden-bridge` on the Pi (e.g. `GARDEN_SERIAL_PORT`,
