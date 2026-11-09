@@ -11,6 +11,7 @@
   Sensor calibration and watering thresholds are in calibration.h.
 */
 
+#include <Arduino.h>
 #include <math.h>
 #include "calibration.h"
 
