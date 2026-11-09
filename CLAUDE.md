@@ -39,6 +39,7 @@ const int sensorPin = A0;    // temperature
 const int moisturePin = A1;  // soil moisture
 ```
 
+The dashboard header shows `Arduino` in serial mode and `ESP32: Battery N%` in MQTT mode (`DEVICE_NAME`).
 Dashboard temperature panel colours: >= 30 C red, 24 to < 30 C green, < 24 C blue.
 `HOT_THRESHOLD` / `COOL_THRESHOLD` live in `garden_bridge.py`.
 
@@ -50,7 +51,7 @@ One JSON object per line, once a second:
 ```
 - `water` is `"dry"`, `"ok"` or `"wet"`, decided on the Arduino with hysteresis (`MOISTURE_HYSTERESIS`).
 - The bridge ignores any line that isn't JSON with numeric `temp_c` and `moisture_pct`.
-- The ESP32 sketch sends the same JSON to MQTT topic `garden/esp32/reading`, with raw values in millivolts, every 10 minutes.
+- The ESP32 sketch sends the same JSON to MQTT topic `garden/esp32/reading`, with raw values in millivolts, every 10 minutes. If `BATTERY_DIVIDER_FITTED` is true it also sends `battery_mv` and `battery_pct`.
 - If the protocol changes, update `parse_line()`, the `reading` dict in `handle_reading()`, the dashboard JS and the HA discovery config together.
 
 ## Dashboard API (bridge)

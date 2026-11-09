@@ -17,6 +17,13 @@ const bool BENCH_MODE = true;
 const unsigned long BENCH_INTERVAL_S = 10;   // time between readings in BENCH_MODE
 const unsigned long SLEEP_INTERVAL_S = 600;  // time between readings on battery
 
+// ---------------- Battery level ----------------
+// Set to true once two 200k resistors are fitted (BAT+ -> 200k -> A0 -> 200k
+// -> GND). While false, the dashboard shows "Battery --%".
+const bool BATTERY_DIVIDER_FITTED = false;
+// Actual battery voltage / voltage at A0. Adjust to match a multimeter reading.
+const float BATTERY_DIVIDER_RATIO = 2.0;
+
 // ---------------- Temperature ----------------
 // Added to every temperature reading (degrees C). Carried over from the
 // Arduino and not yet verified on this board.

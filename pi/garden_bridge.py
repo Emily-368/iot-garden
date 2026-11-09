@@ -41,6 +41,7 @@ except ImportError:  # MQTT is optional
 
 # ---------------- CONFIG ----------------
 INPUT_MQTT = os.environ.get("GARDEN_INPUT", "serial") == "mqtt"
+DEVICE_NAME = "ESP32" if INPUT_MQTT else "Arduino"   # shown on the dashboard
 
 SERIAL_PORT =os.environ.get("GARDEN_SERIAL_PORT", "/dev/ttyACM0")
 SERIAL_BAUD = int(os.environ.get("GARDEN_SERIAL_BAUD", "9600"))
@@ -170,6 +171,9 @@ class MqttPublisher:
                                           "device_class": "moisture", "state_class": "measurement"}),
             ("watering", "water_status", {"name": "Watering", "icon": "mdi:watering-can"}),
         ]
+        if INPUT_MQTT:
+            sensors.append(("battery", "battery_pct", {"name": "Battery", "unit_of_measurement": "%",
+                                                       "device_class": "battery", "state_class": "measurement"}))
         for key, field, extra in sensors:
             config = {
                 **extra,
@@ -223,6 +227,8 @@ def handle_reading(data, publisher):
         "wet_above": data.get("wet_above"),
         "temp_raw": data.get("temp_raw"),
         "moisture_raw": data.get("moisture_raw"),
+        "battery_mv": data.get("battery_mv"),
+        "battery_pct": data.get("battery_pct"),
     }
     with latest_lock:
         latest.clear()
@@ -335,6 +341,10 @@ main { max-width: 540px; margin: 0 auto; }
 
 header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; }
 h1 { font-size: 1.2rem; margin: 0; }
+.top { display: grid; grid-template-columns: 1fr auto 1fr; }
+.top h1 { white-space: nowrap; }
+#device { font-size: .85rem; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { #device { max-width: 6em; } }
 #status { font-size: .85rem; color: var(--muted); text-align: right; }
 #status.stale { color: var(--warn); font-weight: 700; }
 
@@ -404,8 +414,9 @@ canvas { width: 100%; height: 150px; display: block; }
 </head>
 <body>
 <main>
-  <header>
+  <header class="top">
     <h1>🌱 IoT Garden</h1>
+    <span id="device"></span>
     <span id="status" role="status">Connecting to the Pi…</span>
   </header>
 
@@ -447,7 +458,7 @@ canvas { width: 100%; height: 150px; display: block; }
 </main>
 
 <script>
-const HOT = __HOT__, COOL = __COOL__, STALE_AFTER = __STALE__;
+const HOT = __HOT__, COOL = __COOL__, STALE_AFTER = __STALE__, DEVICE = '__DEVICE__';
 let rangeHours = 24, history = null, current = null;
 const $ = id => document.getElementById(id);
 const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -456,6 +467,11 @@ function bandColor(t) {
   if (t >= HOT)  return '--hot';
   if (t >= COOL) return '--ideal';
   return '--cool';
+}
+
+function showDevice(battery) {
+  const pct = typeof battery === 'number' ? Math.round(battery) : '--';
+  $('device').textContent = DEVICE === 'ESP32' ? `${DEVICE}: Battery ${pct}%` : DEVICE;
 }
 
 function ago(s) {
@@ -477,6 +493,7 @@ async function loadLatest() {
     $('moist').textContent = Math.round(d.moisture_pct);
     $('moistBar').style.width = Math.max(0, Math.min(100, d.moisture_pct)) + '%';
     current = d;
+    showDevice(d.battery_pct);
     showWatering(d);
     $('tempRaw').textContent = d.temp_raw ?? '--';
     $('moistRaw').textContent = d.moisture_raw ?? '--';
@@ -603,6 +620,7 @@ $('range').addEventListener('click', e => {
 window.addEventListener('resize', drawAll);
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { loadLatest(); drawAll(); });
 
+showDevice();
 loadLatest().then(loadHistory);
 setInterval(loadLatest, 5000);
 setInterval(loadHistory, 60000);
@@ -614,6 +632,7 @@ DASHBOARD_HTML = (
     DASHBOARD_HTML.replace("__HOT__", str(HOT_THRESHOLD))
     .replace("__COOL__", str(COOL_THRESHOLD))
     .replace("__STALE__", str(STALE_AFTER_S))
+    .replace("__DEVICE__", DEVICE_NAME)
 )
 
 

@@ -16,7 +16,8 @@
     Soil sensor (KS0049)          Signal -> A2   VCC -> D3   GND -> GND
     Battery                       + -> BAT+ pad (near D5)
                                   - -> BAT- pad (near D8)
-    A0 is left free for a future battery voltage divider.
+    Battery level (optional, set BATTERY_DIVIDER_FITTED in calibration.h)
+                                  BAT+ pad -> 200k -> A0 -> 200k -> GND
 
   Setup
     Arduino IDE board: XIAO_ESP32C6 (esp32 by Espressif core, version 3.x)
@@ -36,6 +37,7 @@
 #include "secrets.h"
 
 // ---------------- Pins ----------------
+const int batteryPin     = A0;  // battery voltage divider
 const int sensorPin      = A1;  // temperature sensor
 const int moisturePin    = A2;  // soil moisture sensor
 const int sensorPowerPin = D3;  // powers both sensors only while reading
@@ -128,6 +130,23 @@ int waterState(int moisturePct) {
   return savedWaterState;
 }
 
+// Approximate LiPo charge from its voltage at light load
+int batteryPercent(int batteryMv) {
+  const int points[][2] = {
+    {3000, 0}, {3450, 5}, {3680, 10}, {3740, 20}, {3770, 30}, {3790, 40},
+    {3820, 50}, {3870, 60}, {3920, 70}, {3980, 80}, {4060, 90}, {4200, 100}
+  };
+  const int count = sizeof(points) / sizeof(points[0]);
+
+  if (batteryMv <= points[0][0]) return 0;
+  for (int i = 1; i < count; i++) {
+    if (batteryMv <= points[i][0]) {
+      return map(batteryMv, points[i - 1][0], points[i][0], points[i - 1][1], points[i][1]);
+    }
+  }
+  return 100;
+}
+
 // Short code sent to the Pi
 const char* waterCode(int state) {
   if (state == WATER_NEEDED)  return "dry";
@@ -181,13 +200,21 @@ void readAndPublish() {
 
   digitalWrite(sensorPowerPin, LOW);
 
-  char payload[160];
+  // Read the battery before Wi-Fi starts, while the load is light
+  char battery[48] = "";
+  if (BATTERY_DIVIDER_FITTED) {
+    int batteryMv = readAverageMv(batteryPin) * BATTERY_DIVIDER_RATIO;
+    snprintf(battery, sizeof(battery), ",\"battery_mv\":%d,\"battery_pct\":%d",
+             batteryMv, batteryPercent(batteryMv));
+  }
+
+  char payload[200];
   snprintf(payload, sizeof(payload),
            "{\"temp_c\":%.1f,\"moisture_pct\":%d,\"water\":\"%s\","
            "\"water_below\":%d,\"wet_above\":%d,"
-           "\"temp_raw\":%d,\"moisture_raw\":%d}",
+           "\"temp_raw\":%d,\"moisture_raw\":%d%s}",
            tempC, moisturePct, waterCode(state),
-           WATER_BELOW_PCT, TOO_WET_ABOVE_PCT, tempRaw, moistureRaw);
+           WATER_BELOW_PCT, TOO_WET_ABOVE_PCT, tempRaw, moistureRaw, battery);
   logLine(payload);
 
   if (!connectWifi()) {
