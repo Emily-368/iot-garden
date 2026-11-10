@@ -283,6 +283,11 @@ def api_latest():
         data = dict(latest)
     if data:
         data["age_s"] = int(time.time()) - data["ts"]
+    # Dashboard settings, so other clients (e.g. the iOS app) match the web page
+    data["device"] = DEVICE_NAME
+    data["stale_after_s"] = STALE_AFTER_S
+    data["hot_threshold"] = HOT_THRESHOLD
+    data["cool_threshold"] = COOL_THRESHOLD
     return jsonify(data)
 
 

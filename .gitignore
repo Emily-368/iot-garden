@@ -19,3 +19,7 @@ pcb/
 
 # ESP32 Wi-Fi and MQTT passwords
 esp32/**/secrets.h
+
+# Xcode per-user state and build output
+xcuserdata/
+DerivedData/

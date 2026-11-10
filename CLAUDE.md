@@ -21,6 +21,7 @@ Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
 | `arduino/iot_garden/iot_garden.ino` | Sketch. Folder name must match the .ino name (Arduino rule). |
 | `arduino/iot_garden/calibration.h` | All calibration values and watering thresholds. Edit here, not in the sketch. |
 | `esp32/iot_garden_esp32/` | Sketch for the planned XIAO ESP32-C6 move (Wi-Fi/MQTT, deep sleep). Not deployed yet. Set `GARDEN_INPUT=mqtt` on the Pi to switch the bridge to it. Passwords go in `secrets.h`, which Git ignores. |
+| `IoT Garden/` | SwiftUI iOS app (Xcode project) that mirrors the web dashboard using `/api/latest` and `/api/history`. Default Pi address `http://ras-4:5000`, changeable in the app. `update.sh` ignores it. |
 | `pi/garden_bridge.py` | Serial or MQTT reading input (`GARDEN_INPUT`, default `serial`), SQLite logger, MQTT publisher and dashboard (HTML/CSS/JS embedded in `DASHBOARD_HTML`). |
 | `pi/garden-bridge.service` | systemd template. `CHANGE_ME_USER` / `CHANGE_ME_DIR` are filled in by `update.sh`. Don't hardcode them. |
 | `pi/requirements.txt` | pyserial, paho-mqtt (2.x callback API), flask |
@@ -57,7 +58,7 @@ One JSON object per line, once a second:
 ## Dashboard API (bridge)
 
 - `GET /` dashboard (phone-first, light/dark, no external JS)
-- `GET /api/latest` latest reading plus `age_s`
+- `GET /api/latest` latest reading plus `age_s`, and the dashboard settings `device`, `stale_after_s`, `hot_threshold`, `cool_threshold` (used by the iOS app)
 - `GET /api/history?hours=N` bucketed averages, at most ~400 points
 
 The dashboard has no authentication. Remote access is via Tailscale only; never suggest port-forwarding 5000.
