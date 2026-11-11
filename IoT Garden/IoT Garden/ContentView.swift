@@ -260,8 +260,15 @@ struct ContentView: View {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
                     rawRow("Temperature sensor", latest?.tempRaw)
                     rawRow("Moisture sensor", latest?.moistureRaw)
+                    // Rows that only the ESP32 sends
                     if latest?.batteryMv != nil {
                         rawRow("Battery (mV)", latest?.batteryMv)
+                    }
+                    if latest?.rssi != nil {
+                        rawRow("Wi-Fi signal (dBm)", latest?.rssi)
+                    }
+                    if latest?.awakeMs != nil {
+                        rawRow("Last wake time (ms)", latest?.awakeMs)
                     }
                 }
                 Text("Use these values when filling in calibration.h. They update with each new reading.")

@@ -22,6 +22,8 @@ Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
 | `arduino/iot_garden/calibration.h` | All calibration values and watering thresholds. Edit here, not in the sketch. |
 | `esp32/iot_garden_esp32/` | Sketch for the planned XIAO ESP32-C6 move (Wi-Fi/MQTT, deep sleep). Not deployed yet. Set `GARDEN_INPUT=mqtt` on the Pi to switch the bridge to it. Passwords go in `secrets.h`, which Git ignores. |
 | `IoT Garden/` | SwiftUI iOS app (Xcode project) that mirrors the web dashboard using `/api/latest` and `/api/history`. Default Pi address `http://ras-4:5000`, changeable in the app. `update.sh` ignores it. |
+| `esp32/BATTERY_TESTING.md` | Procedure for measuring the ESP32's battery use once built. |
+| `CHANGELOG.md` | Bugs fixed and improvements made, with the reasoning. Add to it when making notable changes. |
 | `pi/garden_bridge.py` | Serial or MQTT reading input (`GARDEN_INPUT`, default `serial`), SQLite logger, MQTT publisher and dashboard (HTML/CSS/JS embedded in `DASHBOARD_HTML`). |
 | `pi/garden-bridge.service` | systemd template. `CHANGE_ME_USER` / `CHANGE_ME_DIR` are filled in by `update.sh`. Don't hardcode them. |
 | `pi/requirements.txt` | pyserial, paho-mqtt (2.x callback API), flask |
@@ -52,7 +54,8 @@ One JSON object per line, once a second:
 ```
 - `water` is `"dry"`, `"ok"` or `"wet"`, decided on the Arduino with hysteresis (`MOISTURE_HYSTERESIS`).
 - The bridge ignores any line that isn't JSON with numeric `temp_c` and `moisture_pct`.
-- The ESP32 sketch sends the same JSON to MQTT topic `garden/esp32/reading`, with raw values in millivolts, every 10 minutes. If `BATTERY_DIVIDER_FITTED` is true it also sends `battery_mv` and `battery_pct`.
+- The ESP32 sketch sends the same JSON to MQTT topic `garden/esp32/reading`, with raw values in millivolts, every `SLEEP_INTERVAL_S` (default 10 minutes). It adds `interval_s`, `awake_ms` (how long the previous wake lasted) and `rssi`, and with `BATTERY_DIVIDER_FITTED` also `battery_mv` and `battery_pct`. The bridge treats all of these as optional (`EXTRA_FIELDS`).
+- The "no data" warning in MQTT mode is `interval_s * 2 + 300` seconds, so changing `SLEEP_INTERVAL_S` needs no bridge change.
 - If the protocol changes, update `parse_line()`, the `reading` dict in `handle_reading()`, the dashboard JS and the HA discovery config together.
 
 ## Dashboard API (bridge)
@@ -60,6 +63,7 @@ One JSON object per line, once a second:
 - `GET /` dashboard (phone-first, light/dark, no external JS)
 - `GET /api/latest` latest reading plus `age_s`, and the dashboard settings `device`, `stale_after_s`, `hot_threshold`, `cool_threshold` (used by the iOS app)
 - `GET /api/history?hours=N` bucketed averages, at most ~400 points
+- `GET /api/export.csv?hours=N` every logged row as CSV, including `battery_mv`, `rssi_dbm` and `awake_ms` (used by `esp32/BATTERY_TESTING.md`)
 
 The dashboard has no authentication. Remote access is via Tailscale only; never suggest port-forwarding 5000.
 Setup steps are in README "Remote access (Tailscale)": `tailscale up --ssh` on the Pi, key expiry disabled,
@@ -76,6 +80,7 @@ Keep `WEB_HOST = "0.0.0.0"` so both LAN and tailnet access work.
   (FQBN `arduino:avr:uno`) after stopping the bridge to free the port.
 - Pi-specific settings go in `/etc/default/garden-bridge` on the Pi (e.g. `GARDEN_SERIAL_PORT`,
   `GARDEN_MQTT_HOST/USER/PASS`), never in the repo.
+- The ESP32 sketch has not been compiled with the real ESP32 core or run on hardware yet (no `arduino-cli` on the Mac). Expect small fixes on first build.
 - Mosquitto runs locally on the Pi. For the ESP32 it needs a network listener and login; keep it LAN/tailnet only and never port-forward it. Home Assistant is not installed yet (planned option: Docker container,
   not HA OS). The bridge already sends HA MQTT auto-discovery for temperature, moisture and watering status.
 
@@ -92,7 +97,8 @@ Never edit files directly on the Pi; `git pull --ff-only` will refuse if the Pi 
 - **Executable bit:** commits made from Windows can drop it on `update.sh`. Fix with
   `git update-index --chmod=+x update.sh`, or run it as `bash update.sh`.
 - **Divergent branches:** happened once. Use `pull.rebase true` (set per repo on the Mac clone, as `git config --local pull.rebase true`). Never force-push.
-- **Failed updates:** if `update.sh` fails after pulling (e.g. during a flash), the next run says "Already up to date" and skips the rest. Recover with `update.sh --all`.
+- **Failed updates:** `update.sh` records the last fully applied commit in `.git/garden-applied`, so after a failure (e.g. during a flash) just run it again. `--all` still forces everything.
+- **Uno unplugged:** with `GARDEN_INPUT=mqtt` in `/etc/default/garden-bridge`, `update.sh` skips flashing the Uno.
 - **Serial port:** default `/dev/ttyACM0`; clone boards may be `/dev/ttyUSB0`. User must be in `dialout`.
 - Opening the serial port resets the Uno on every bridge restart, so readings pause briefly. Expected.
 - Use `mkdir -p` before installers that write into `~/.local/bin`.
@@ -100,7 +106,7 @@ Never edit files directly on the Pi; `git pull --ff-only` will refuse if the Pi 
 ## Calibration status / open items
 
 - Temperature read about 10 C off. `TEMP_OFFSET` in `calibration.h` is the fix. The committed value is
-  +10.0, but if the LCD read too high it should be -10.0; confirm the sign against a thermometer.
+  +10.0, but if the dashboard reads too high it should be -10.0; confirm the sign against a thermometer.
   Not yet verified that the error is constant across temperatures. If it isn't, refit the thermistor conversion from raw/thermometer pairs.
 - `MOISTURE_DRY` / `MOISTURE_WET` are placeholders (0 / 950); take real readings from the dashboard's
   "Raw sensor readings" panel (dry air, glass of water).

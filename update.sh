@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Pull the latest code from GitHub and apply whatever changed.
 #
-#   ./update.sh         update only what changed since the last pull
+#   ./update.sh         update only what changed since the last successful update
 #   ./update.sh --all   reinstall everything and reflash the Arduino
 #
 # - Pi code changed      -> restart the bridge service
 # - Service file changed -> reinstall it into systemd
 # - Arduino sketch changed -> compile and flash it over USB from the Pi
+#   (skipped when the bridge reads the ESP32 instead: GARDEN_INPUT=mqtt)
+#
+# If a run fails part-way (e.g. the flash), just run it again: it picks up
+# where the last successful update left off.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,6 +18,7 @@ SKETCH_DIR="$REPO_DIR/arduino/iot_garden"
 FQBN="arduino:avr:uno"
 SERVICE="garden-bridge"
 ENV_FILE="/etc/default/garden-bridge"
+APPLIED_FILE="$REPO_DIR/.git/garden-applied"   # the commit the last successful update applied
 export PATH="$HOME/.local/bin:$PATH"   # where arduino-cli is installed
 
 cd "$REPO_DIR"
@@ -21,17 +26,32 @@ cd "$REPO_DIR"
 FORCE=0
 [[ "${1:-}" == "--all" ]] && FORCE=1
 
-# Use the same serial port as the bridge
+# Use the same serial port and input as the bridge
 PORT="/dev/ttyACM0"
+INPUT="serial"
 if [[ -r "$ENV_FILE" ]]; then
   PORT="$(sed -n 's/^GARDEN_SERIAL_PORT=//p' "$ENV_FILE" | tail -n1)"
   PORT="${PORT:-/dev/ttyACM0}"
+  INPUT="$(sed -n 's/^GARDEN_INPUT=//p' "$ENV_FILE" | tail -n1)"
+  INPUT="${INPUT:-serial}"
 fi
 
-OLD="$(git rev-parse HEAD)"
+BEFORE_PULL="$(git rev-parse HEAD)"
 echo "Pulling from GitHub..."
 git pull --ff-only
 NEW="$(git rev-parse HEAD)"
+
+# Compare against the last commit that was fully applied, not the last pull.
+# Otherwise a run that failed after pulling would look "up to date" next time.
+if [[ ! -s "$APPLIED_FILE" ]]; then
+  echo "$BEFORE_PULL" > "$APPLIED_FILE"
+fi
+OLD="$(cat "$APPLIED_FILE")"
+if ! git cat-file -e "${OLD}^{commit}" 2>/dev/null; then
+  echo "Can't find the last applied version; applying everything."
+  FORCE=1
+  OLD="$NEW"
+fi
 
 if [[ $FORCE == 0 && "$OLD" == "$NEW" ]]; then
   echo "Already up to date."
@@ -62,7 +82,11 @@ if changed pi/garden-bridge.service; then
 fi
 
 # Arduino sketch (the bridge must release the serial port while flashing)
-if changed arduino/; then
+if [[ "$INPUT" == "mqtt" ]]; then
+  if changed arduino/; then
+    echo "Skipping the Arduino flash: the bridge reads the ESP32 (GARDEN_INPUT=mqtt)."
+  fi
+elif changed arduino/; then
   echo "Flashing Arduino on $PORT..."
   sudo systemctl stop "$SERVICE" || true
   if ! arduino-cli compile --upload --fqbn "$FQBN" -p "$PORT" "$SKETCH_DIR"; then
@@ -78,4 +102,5 @@ if changed pi/ arduino/; then
   sudo systemctl restart "$SERVICE"
 fi
 
+echo "$NEW" > "$APPLIED_FILE"
 echo "Done. Now running: $(git log -1 --format='%h %s')"

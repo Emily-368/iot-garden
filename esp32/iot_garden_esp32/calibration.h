@@ -15,7 +15,18 @@
 // false: deep sleeps between readings. Use this on battery.
 const bool BENCH_MODE = true;
 const unsigned long BENCH_INTERVAL_S = 10;   // time between readings in BENCH_MODE
-const unsigned long SLEEP_INTERVAL_S = 600;  // time between readings on battery
+
+// Time between readings on battery. This is the biggest battery setting:
+// every reading costs one Wi-Fi connection. 600 = 10 minutes. The dashboard
+// adjusts its "no data" warning to match automatically.
+const unsigned long SLEEP_INTERVAL_S = 600;
+
+// ---------------- Wi-Fi power (optional) ----------------
+// Lower transmit power uses less battery, but a weak link fails and retries,
+// which costs far more. Only enable this if the dashboard shows a Wi-Fi signal
+// stronger than about -65 dBm, then check readings still arrive every time.
+// Steps include WIFI_POWER_15dBm, WIFI_POWER_11dBm and WIFI_POWER_8_5dBm.
+// #define WIFI_TX_POWER WIFI_POWER_15dBm
 
 // ---------------- Battery level ----------------
 // Set to true once two 200k resistors are fitted (BAT+ -> 200k -> A0 -> 200k
@@ -23,6 +34,18 @@ const unsigned long SLEEP_INTERVAL_S = 600;  // time between readings on battery
 const bool BATTERY_DIVIDER_FITTED = false;
 // Actual battery voltage / voltage at A0. Adjust to match a multimeter reading.
 const float BATTERY_DIVIDER_RATIO = 2.0;
+// Below this the board leaves Wi-Fi off and sleeps for an hour at a time,
+// until the battery is recharged. Needs the divider fitted.
+const int BATTERY_CRITICAL_MV = 3300;
+// Readings below this mean no battery is connected (USB power only), so the
+// critical check is skipped.
+const int BATTERY_PRESENT_MV = 2000;
+
+// ---------------- Sensor supply ----------------
+// Voltage on pin D3 while the sensors are powered (millivolts). The pin sags a
+// little under load, which shifts the temperature. Measure D3 to GND with a
+// multimeter in BENCH_MODE while a reading is taken, and enter it here.
+const float SENSOR_SUPPLY_MV = 3300.0;
 
 // ---------------- Temperature ----------------
 // Added to every temperature reading (degrees C). Carried over from the

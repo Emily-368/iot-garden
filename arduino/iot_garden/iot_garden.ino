@@ -34,6 +34,7 @@ unsigned long lastUpdate = 0;
 
 // Average several readings to smooth out noise
 int readAverage(int pin) {
+  analogRead(pin);   // the first reading after switching pins can be off; discard it
   long total = 0;
   for (int i = 0; i < NUM_SAMPLES; i++) {
     total += analogRead(pin);

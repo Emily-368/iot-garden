@@ -13,6 +13,8 @@ nonisolated struct LatestReading: Decodable, Equatable {
     var moistureRaw: Double?
     var batteryMv: Double?
     var batteryPct: Double?
+    var rssi: Double?
+    var awakeMs: Double?
     var ageS: Int?
 
     // Dashboard settings (sent by newer bridges)

@@ -15,14 +15,17 @@ Watering status ("dry", "ok", "wet") and its thresholds come from the sensor
 board, set in its calibration.h, so there is one place to calibrate.
 
 and then:
-  - keeps the latest reading in memory
+  - keeps the latest reading in memory (and restores it after a restart)
   - logs one reading per minute to SQLite (garden.db next to this script)
   - publishes to MQTT (topic garden/state) with Home Assistant auto-discovery
   - serves a phone-friendly dashboard at http://<pi-address>:5000
+  - serves the logged readings as CSV at /api/export.csv?hours=N
 
 Settings can be overridden with environment variables (see CONFIG).
 """
 
+import csv
+import io
 import json
 import logging
 import os
@@ -43,12 +46,13 @@ except ImportError:  # MQTT is optional
 INPUT_MQTT = os.environ.get("GARDEN_INPUT", "serial") == "mqtt"
 DEVICE_NAME = "ESP32" if INPUT_MQTT else "Arduino"   # shown on the dashboard
 
-SERIAL_PORT =os.environ.get("GARDEN_SERIAL_PORT", "/dev/ttyACM0")
+SERIAL_PORT = os.environ.get("GARDEN_SERIAL_PORT", "/dev/ttyACM0")
 SERIAL_BAUD = int(os.environ.get("GARDEN_SERIAL_BAUD", "9600"))
 
 DB_PATH = Path(os.environ.get("GARDEN_DB", Path(__file__).resolve().parent / "garden.db"))
 LOG_INTERVAL_S = 60      # how often a reading is saved to the database
 KEEP_DAYS = 30           # rows older than this are deleted
+PRUNE_INTERVAL_S = 3600  # how often old rows are deleted
 
 MQTT_ENABLED = os.environ.get("GARDEN_MQTT", "1") == "1"
 MQTT_HOST = os.environ.get("GARDEN_MQTT_HOST", "localhost")
@@ -67,8 +71,9 @@ WEB_PORT = int(os.environ.get("GARDEN_WEB_PORT", "5000"))
 HOT_THRESHOLD = 30.0
 COOL_THRESHOLD = 24.0
 
-# Dashboard warns if no data for this long. The ESP32 sends every 10 minutes,
-# so this allows for one missed reading before warning.
+# Dashboard warns if no data for this long. The ESP32 reports how often it
+# sends ("interval_s"), and the warning then allows for one missed reading.
+# 1500 is the fallback for its default of 10 minutes.
 STALE_AFTER_S = 1500 if INPUT_MQTT else 30
 # ----------------------------------------
 
@@ -77,10 +82,17 @@ log = logging.getLogger("garden")
 
 WATER_LABELS = {"dry": "Needs watering", "ok": "Okay", "wet": "Too wet"}
 
+# Optional numeric fields the ESP32 adds to its readings. They are passed
+# through to the dashboard, and EXTRA_COLUMNS are also logged to the database.
+EXTRA_FIELDS = ("battery_mv", "battery_pct", "rssi", "awake_ms", "interval_s")
+EXTRA_COLUMNS = ("battery_mv", "rssi", "awake_ms")
+
 latest = {}
+latest_received = 0.0    # time.monotonic() when the latest reading arrived
 latest_lock = threading.Lock()
 last_logged = 0
 last_published = 0
+last_pruned = None
 
 
 # ---------------- Database ----------------
@@ -104,14 +116,63 @@ def db_init():
         " ts INTEGER NOT NULL, temp_c REAL, moisture_pct REAL)"
     )
     db_execute("CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(ts)")
+    # Columns added after the first version: add them to an existing database
+    existing = {row[1] for row in db_execute("PRAGMA table_info(readings)", fetch=True)}
+    for column in EXTRA_COLUMNS:
+        if column not in existing:
+            db_execute(f"ALTER TABLE readings ADD COLUMN {column} REAL")
+    db_execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
 
 def db_insert(reading):
-    db_execute(
-        "INSERT INTO readings (ts, temp_c, moisture_pct) VALUES (?, ?, ?)",
-        (reading["ts"], reading["temp_c"], reading["moisture_pct"]),
-    )
-    db_execute("DELETE FROM readings WHERE ts < ?", (int(time.time()) - KEEP_DAYS * 86400,))
+    """Log a reading, remember it as the latest, and prune old rows now and then."""
+    global last_pruned
+    now = time.monotonic()
+    prune = last_pruned is None or now - last_pruned >= PRUNE_INTERVAL_S
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        with conn:   # one transaction, so one write to the SD card
+            conn.execute(
+                "INSERT INTO readings (ts, temp_c, moisture_pct, battery_mv, rssi, awake_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (reading["ts"], reading["temp_c"], reading["moisture_pct"],
+                 reading["battery_mv"], reading["rssi"], reading["awake_ms"]),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO state (key, value) VALUES ('latest', ?)",
+                (json.dumps(reading),),
+            )
+            if prune:
+                conn.execute("DELETE FROM readings WHERE ts < ?",
+                             (int(time.time()) - KEEP_DAYS * 86400,))
+    finally:
+        conn.close()
+    if prune:
+        last_pruned = now
+
+
+def restore_latest():
+    """Show the last logged reading straight after a restart, with its true age.
+
+    Without this the dashboard says "No readings yet" until the next reading,
+    which is up to 10 minutes with the ESP32.
+    """
+    global latest_received
+    try:
+        rows = db_execute("SELECT value FROM state WHERE key = 'latest'", fetch=True)
+        reading = json.loads(rows[0][0]) if rows else None
+    except (sqlite3.Error, ValueError):
+        return
+    if not isinstance(reading, dict):
+        return
+    if not all(isinstance(reading.get(k), (int, float)) for k in ("ts", "temp_c", "moisture_pct")):
+        return
+    age = max(0.0, time.time() - reading["ts"])
+    with latest_lock:
+        latest.clear()
+        latest.update(reading)
+        latest_received = time.monotonic() - age
+    log.info("Restored the last reading (%d s old)", age)
 
 
 # ---------------- MQTT ----------------
@@ -162,7 +223,7 @@ class MqttPublisher:
         device = {
             "identifiers": ["iot_garden"],
             "name": "IoT Garden",
-            "model": "Arduino Uno + Raspberry Pi 4B",
+            "model": ("XIAO ESP32-C6" if INPUT_MQTT else "Arduino Uno") + " + Raspberry Pi 4B",
         }
         sensors = [
             ("temperature", "temp_c", {"name": "Temperature", "unit_of_measurement": "°C",
@@ -211,7 +272,7 @@ def parse_line(line):
 
 def handle_reading(data, publisher):
     """Store a valid reading, then log and publish it if they are due."""
-    global last_logged, last_published
+    global last_logged, last_published, latest_received
 
     now = int(time.time())
     water = data.get("water")
@@ -227,12 +288,15 @@ def handle_reading(data, publisher):
         "wet_above": data.get("wet_above"),
         "temp_raw": data.get("temp_raw"),
         "moisture_raw": data.get("moisture_raw"),
-        "battery_mv": data.get("battery_mv"),
-        "battery_pct": data.get("battery_pct"),
     }
+    for field in EXTRA_FIELDS:
+        value = data.get(field)
+        is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+        reading[field] = value if is_number else None
     with latest_lock:
         latest.clear()
         latest.update(reading)
+        latest_received = time.monotonic()
 
     if now - last_logged >= LOG_INTERVAL_S:
         try:
@@ -281,11 +345,18 @@ def index():
 def api_latest():
     with latest_lock:
         data = dict(latest)
+        received = latest_received
+    stale_after = STALE_AFTER_S
     if data:
-        data["age_s"] = int(time.time()) - data["ts"]
+        # Measured with the monotonic clock, so the age stays right when the
+        # Pi's clock jumps (it has no battery clock and syncs after booting)
+        data["age_s"] = max(0, int(time.monotonic() - received))
+        interval = data.get("interval_s")
+        if isinstance(interval, (int, float)) and interval > 0:
+            stale_after = int(interval * 2 + 300)   # allows one missed reading
     # Dashboard settings, so other clients (e.g. the iOS app) match the web page
     data["device"] = DEVICE_NAME
-    data["stale_after_s"] = STALE_AFTER_S
+    data["stale_after_s"] = stale_after
     data["hot_threshold"] = HOT_THRESHOLD
     data["cool_threshold"] = COOL_THRESHOLD
     return jsonify(data)
@@ -304,6 +375,30 @@ def api_history():
         fetch=True,
     )
     return jsonify({"hours": hours, "points": rows})
+
+
+@app.get("/api/export.csv")
+def api_export():
+    """Every logged reading in the time range, for spreadsheets and battery tests."""
+    hours = request.args.get("hours", default=24, type=int)
+    hours = max(1, min(hours, KEEP_DAYS * 24))
+    rows = db_execute(
+        "SELECT ts, temp_c, moisture_pct, battery_mv, rssi, awake_ms "
+        "FROM readings WHERE ts >= ? ORDER BY ts",
+        (int(time.time()) - hours * 3600,),
+        fetch=True,
+    )
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["time_utc", "ts", "temp_c", "moisture_pct", "battery_mv", "rssi_dbm", "awake_ms"])
+    for row in rows:
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(row[0]))
+        writer.writerow([stamp, *("" if v is None else v for v in row)])
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=garden-readings.csv"},
+    )
 
 
 DASHBOARD_HTML = r"""<!doctype html>
@@ -397,6 +492,7 @@ h1 { font-size: 1.2rem; margin: 0; }
 .raw dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 10px 0 6px; }
 .raw dt { color: var(--muted); }
 .raw dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 700; }
+.raw [hidden] { display: none; }
 
 .history { margin-top: 30px; }
 .history header { margin-bottom: 8px; }
@@ -457,6 +553,9 @@ canvas { width: 100%; height: 150px; display: block; }
     <dl>
       <dt>Temperature sensor</dt><dd id="tempRaw">--</dd>
       <dt>Moisture sensor</dt><dd id="moistRaw">--</dd>
+      <dt class="extra" hidden>Battery (mV)</dt><dd class="extra" id="batteryMv" hidden></dd>
+      <dt class="extra" hidden>Wi-Fi signal (dBm)</dt><dd class="extra" id="rssi" hidden></dd>
+      <dt class="extra" hidden>Last wake time (ms)</dt><dd class="extra" id="awakeMs" hidden></dd>
     </dl>
     <p class="hint">Use these values when filling in calibration.h. They update with each new reading.</p>
   </details>
@@ -502,15 +601,25 @@ async function loadLatest() {
     showWatering(d);
     $('tempRaw').textContent = d.temp_raw ?? '--';
     $('moistRaw').textContent = d.moisture_raw ?? '--';
+    showExtra('batteryMv', d.battery_mv);
+    showExtra('rssi', d.rssi);
+    showExtra('awakeMs', d.awake_ms);
     $('tempPanel').style.backgroundColor = cssVar(bandColor(d.temp_c));
 
-    const stale = d.age_s > STALE_AFTER;
+    const stale = d.age_s > (d.stale_after_s ?? STALE_AFTER);
     status.classList.toggle('stale', stale);
     status.textContent = stale ? `Last reading ${ago(d.age_s)} ago. Check the garden sensor.` : `Updated ${ago(d.age_s)} ago`;
   } catch (e) {
     status.textContent = "Can't reach the Pi";
     status.classList.add('stale');
   }
+}
+
+// Rows that only the ESP32 sends: hidden unless there is a value
+function showExtra(id, value) {
+  const dd = $(id), has = typeof value === 'number';
+  dd.hidden = dd.previousElementSibling.hidden = !has;
+  dd.textContent = has ? Math.round(value) : '';
 }
 
 function showWatering(d) {
@@ -625,10 +734,23 @@ $('range').addEventListener('click', e => {
 window.addEventListener('resize', drawAll);
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { loadLatest(); drawAll(); });
 
+// Only poll while the page is visible, so a phone with the dashboard left open
+// in the background isn't kept busy. Refresh straight away when it comes back.
+let latestTimer = null, historyTimer = null;
+function startPolling() {
+  if (latestTimer) return;
+  loadLatest().then(loadHistory);
+  latestTimer = setInterval(loadLatest, 5000);
+  historyTimer = setInterval(loadHistory, 60000);
+}
+function stopPolling() {
+  clearInterval(latestTimer); clearInterval(historyTimer);
+  latestTimer = historyTimer = null;
+}
+document.addEventListener('visibilitychange', () => document.hidden ? stopPolling() : startPolling());
+
 showDevice();
-loadLatest().then(loadHistory);
-setInterval(loadLatest, 5000);
-setInterval(loadHistory, 60000);
+if (!document.hidden) startPolling();
 </script>
 </body>
 </html>
@@ -644,6 +766,7 @@ DASHBOARD_HTML = (
 # ---------------- Main ----------------
 def main():
     db_init()
+    restore_latest()
     publisher = MqttPublisher()
     if not INPUT_MQTT:
         threading.Thread(target=serial_loop, args=(publisher,), daemon=True).start()
