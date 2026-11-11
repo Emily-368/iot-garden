@@ -19,7 +19,7 @@ const unsigned long BENCH_INTERVAL_S = 10;   // time between readings in BENCH_M
 // Time between readings on battery. This is the biggest battery setting:
 // every reading costs one Wi-Fi connection. 600 = 10 minutes. The dashboard
 // adjusts its "no data" warning to match automatically.
-const unsigned long SLEEP_INTERVAL_S = 600;
+const unsigned long SLEEP_INTERVAL_S = 900;
 
 // ---------------- Wi-Fi power (optional) ----------------
 // Lower transmit power uses less battery, but a weak link fails and retries,
