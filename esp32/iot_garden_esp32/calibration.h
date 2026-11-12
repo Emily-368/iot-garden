@@ -19,7 +19,7 @@ const unsigned long BENCH_INTERVAL_S = 10;   // time between readings in BENCH_M
 // Time between readings on battery. This is the biggest battery setting:
 // every reading costs one Wi-Fi connection. 600 = 10 minutes. The dashboard
 // adjusts its "no data" warning to match automatically.
-const unsigned long SLEEP_INTERVAL_S = 900;
+const unsigned long SLEEP_INTERVAL_S = 600;
 
 // ---------------- Wi-Fi power (optional) ----------------
 // Lower transmit power uses less battery, but a weak link fails and retries,
@@ -29,10 +29,10 @@ const unsigned long SLEEP_INTERVAL_S = 900;
 // #define WIFI_TX_POWER WIFI_POWER_15dBm
 
 // ---------------- Battery level ----------------
-// Set to true once two 200k resistors are fitted (BAT+ -> 200k -> A0 -> 200k
+// Set to true once two 200k resistors are fitted (BAT+ -> 200k -> D0 -> 200k
 // -> GND). While false, the dashboard shows "Battery --%".
 const bool BATTERY_DIVIDER_FITTED = false;
-// Actual battery voltage / voltage at A0. Adjust to match a multimeter reading.
+// Actual battery voltage / voltage at D0. Adjust to match a multimeter reading.
 const float BATTERY_DIVIDER_RATIO = 2.0;
 // Below this the board leaves Wi-Fi off and sleeps for an hour at a time,
 // until the battery is recharged. Needs the divider fitted.

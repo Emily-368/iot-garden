@@ -21,12 +21,12 @@
   See ../BATTERY_TESTING.md for how to measure it.
 
   Wiring (3.3 V only: the pins are not 5 V tolerant)
-    Temperature sensor (KS0033)   Signal -> A1   VCC -> D3   GND -> GND
-    Soil sensor (KS0049)          Signal -> A2   VCC -> D3   GND -> GND
+    Temperature sensor (KS0033)   Signal -> D1   VCC -> D3   GND -> GND
+    Soil sensor (KS0049)          Signal -> D2   VCC -> D3   GND -> GND
     Battery                       + -> BAT+ pad (near D5)
                                   - -> BAT- pad (near D8)
     Battery level (optional, set BATTERY_DIVIDER_FITTED in calibration.h)
-                                  BAT+ pad -> 200k -> A0 -> 200k -> GND
+                                  BAT+ pad -> 200k -> D0 -> 200k -> GND
 
   Setup
     Arduino IDE board: XIAO_ESP32C6 (esp32 by Espressif core, version 3.x)
@@ -48,9 +48,9 @@
 #include "secrets.h"
 
 // ---------------- Pins ----------------
-const int batteryPin     = A0;  // battery voltage divider
-const int sensorPin      = A1;  // temperature sensor
-const int moisturePin    = A2;  // soil moisture sensor
+const int batteryPin     = D0;  // battery voltage divider
+const int sensorPin      = D1;  // temperature sensor
+const int moisturePin    = D2;  // soil moisture sensor
 const int sensorPowerPin = D3;  // powers both sensors only while reading
 
 // RF switch on the XIAO ESP32-C6 (not exposed on the header pins)
