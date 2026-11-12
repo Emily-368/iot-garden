@@ -22,6 +22,8 @@ Sensors -> Arduino Uno --USB serial (9600, one JSON line/s)--> Raspberry Pi 4B
 | `arduino/iot_garden/calibration.h` | All calibration values and watering thresholds. Edit here, not in the sketch. |
 | `esp32/iot_garden_esp32/` | Sketch for the planned XIAO ESP32-C6 move (Wi-Fi/MQTT, deep sleep). Not deployed yet. Set `GARDEN_INPUT=mqtt` on the Pi to switch the bridge to it. Passwords go in `secrets.h`, which Git ignores. |
 | `IoT Garden/` | SwiftUI iOS app (Xcode project) that mirrors the web dashboard using `/api/latest` and `/api/history`. Default Pi address `http://ras-4:5000`, changeable in the app. `update.sh` ignores it. |
+| `esp32/esp32_test/` | Bench test sketch for the XIAO ESP32-C6 over USB: blinks the LED, scans Wi-Fi and prints both sensors. Needs no passwords or Pi. |
+| `esp32/MQTT_SETUP.md` | Quick guide: Mosquitto listener and login on the Pi, then testing the ESP32's Wi-Fi link end to end. |
 | `esp32/BATTERY_TESTING.md` | Procedure for measuring the ESP32's battery use once built. |
 | `CHANGELOG.md` | Bugs fixed and improvements made, with the reasoning. Add to it when making notable changes. |
 | `pi/garden_bridge.py` | Serial or MQTT reading input (`GARDEN_INPUT`, default `serial`), SQLite logger, MQTT publisher and dashboard (HTML/CSS/JS embedded in `DASHBOARD_HTML`). |
