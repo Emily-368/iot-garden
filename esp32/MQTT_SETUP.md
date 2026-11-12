@@ -192,9 +192,9 @@ garden/esp32/reading {"temp_c":21.4,"moisture_pct":0,"water":"dry",...,"rssi":-5
 To test the real position, power the board from a USB power bank or the
 battery, carry it to where it will live outside, and watch Window 1 on the Pi.
 Count the messages over a few minutes: at one every 10 seconds, any gaps show
-up quickly. Compare the built-in antenna with the external one by setting the
-antenna in the test sketch, or by watching `rssi` here with the external
-antenna plugged in (the main sketch always uses the external one).
+up quickly. To compare the built-in antenna with the external one, change
+`USE_EXTERNAL_ANTENNA` in `calibration.h`, upload, and compare `rssi` at the
+same spot.
 
 ## 7. Optional: show the ESP32 on the dashboard
 

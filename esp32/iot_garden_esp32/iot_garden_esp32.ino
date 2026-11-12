@@ -3,7 +3,7 @@
   ----------------------------------------------
   Battery-powered outdoor sensor node. Each cycle it:
     1. Powers the sensors, averages their readings, then powers them off
-    2. Joins Wi-Fi through the external U.FL antenna
+    2. Joins Wi-Fi through the external or built-in antenna (USE_EXTERNAL_ANTENNA)
     3. Publishes one JSON reading to MQTT on the Pi, e.g.
        {"temp_c":25.3,"moisture_pct":45,"water":"ok","water_below":30,
         "wet_above":80,"temp_raw":1650,"moisture_raw":1200,
@@ -104,12 +104,12 @@ void logLine(const char* message) {
   if (BENCH_MODE) Serial.println(message);
 }
 
-// Use the external antenna. Must run before Wi-Fi starts.
-void selectExternalAntenna() {
+// Pick the antenna set in calibration.h. Must run before Wi-Fi starts.
+void selectAntenna() {
   pinMode(rfSwitchEnablePin, OUTPUT);
   digitalWrite(rfSwitchEnablePin, LOW);
   pinMode(antennaSelectPin, OUTPUT);
-  digitalWrite(antennaSelectPin, HIGH);
+  digitalWrite(antennaSelectPin, USE_EXTERNAL_ANTENNA ? HIGH : LOW);
 }
 
 // Average several readings to smooth out noise, in millivolts
@@ -366,7 +366,8 @@ void setup() {
   digitalWrite(sensorPowerPin, LOW);
 
   analogReadResolution(12);
-  selectExternalAntenna();
+  selectAntenna();
+  logLine(USE_EXTERNAL_ANTENNA ? "Antenna: external (U.FL socket)" : "Antenna: built-in");
 }
 
 void loop() {

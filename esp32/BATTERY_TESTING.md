@@ -270,7 +270,7 @@ Listed from largest effect to smallest.
 | Setting | Where | Effect |
 |---|---|---|
 | `SLEEP_INTERVAL_S` | `calibration.h` | Biggest. 900 (15 min) uses about a third less than 600. Soil moisture changes slowly, so longer gaps lose little |
-| Wi-Fi signal | Antenna position | A weak link means long wakes and retries |
+| Wi-Fi signal | Antenna position, and `USE_EXTERNAL_ANTENNA` in `calibration.h` | A weak link means long wakes and retries |
 | Static IP | `secrets.h` | Skips asking the router for an address on every wake |
 | `WIFI_TX_POWER` | `calibration.h` | Lower transmit power. Only worth trying with a strong signal, and re-run Test 1 afterwards |
 | Battery divider | Hardware | 200k + 200k draws about 10 µA all the time. Small next to Wi-Fi |

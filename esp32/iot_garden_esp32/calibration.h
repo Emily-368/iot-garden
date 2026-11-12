@@ -21,6 +21,14 @@ const unsigned long BENCH_INTERVAL_S = 10;   // time between readings in BENCH_M
 // adjusts its "no data" warning to match automatically.
 const unsigned long SLEEP_INTERVAL_S = 600;
 
+// ---------------- Antenna ----------------
+// true:  the external antenna plugged into the U.FL socket.
+// false: the small antenna built into the board.
+// To compare them, upload once with each setting at the same spot and compare
+// "Wi-Fi signal (dBm)" on the dashboard (closer to zero is stronger).
+// Leaving this true with no antenna plugged in gives a very weak signal.
+const bool USE_EXTERNAL_ANTENNA = true;
+
 // ---------------- Wi-Fi power (optional) ----------------
 // Lower transmit power uses less battery, but a weak link fails and retries,
 // which costs far more. Only enable this if the dashboard shows a Wi-Fi signal
