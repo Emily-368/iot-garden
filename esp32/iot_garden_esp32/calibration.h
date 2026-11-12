@@ -27,7 +27,7 @@ const unsigned long SLEEP_INTERVAL_S = 600;
 // To compare them, upload once with each setting at the same spot and compare
 // "Wi-Fi signal (dBm)" on the dashboard (closer to zero is stronger).
 // Leaving this true with no antenna plugged in gives a very weak signal.
-const bool USE_EXTERNAL_ANTENNA = true;
+const bool USE_EXTERNAL_ANTENNA = false;
 
 // ---------------- Wi-Fi power (optional) ----------------
 // Lower transmit power uses less battery, but a weak link fails and retries,
