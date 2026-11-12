@@ -29,6 +29,22 @@ const unsigned long SLEEP_INTERVAL_S = 600;
 // Leaving this true with no antenna plugged in gives a very weak signal.
 const bool USE_EXTERNAL_ANTENNA = false;
 
+// ---------------- Service button (optional) ----------------
+// A push button that wakes the board for troubleshooting or a wireless update.
+// Short press: troubleshooting mode. Hold 3 seconds: update mode. See the top
+// of the sketch for what each does.
+// Wiring: one leg to the pad below, the other leg to GND.
+// Set BUTTON_FITTED to false if no button is wired.
+const bool BUTTON_FITTED = true;
+// Only a few pins can wake the board from deep sleep:
+//   6 = MTCK pad on the back of the board (recommended)
+//   7 = MTDO pad on the back of the board
+//   0 = D0 on the header. Easier to reach, but only while the battery divider
+//       is not fitted, because the divider uses D0.
+const int BUTTON_GPIO = 6;
+// Both modes end on their own after this long, to protect the battery.
+const unsigned long SERVICE_TIMEOUT_S = 600;
+
 // ---------------- Wi-Fi power (optional) ----------------
 // Lower transmit power uses less battery, but a weak link fails and retries,
 // which costs far more. Only enable this if the dashboard shows a Wi-Fi signal

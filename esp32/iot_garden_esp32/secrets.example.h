@@ -24,3 +24,8 @@ const char* MQTT_PASSWORD = nullptr;
 // const IPAddress STATIC_GATEWAY(192, 168, 1, 1);    // your router
 // const IPAddress STATIC_SUBNET(255, 255, 255, 0);
 // const IPAddress STATIC_DNS(192, 168, 1, 1);        // usually the router too
+
+// Optional: wireless updates from Arduino IDE (hold the service button for 3
+// seconds). Choose a password, then remove the // from the line below. Arduino
+// IDE asks for it when you upload.
+// #define OTA_PASSWORD "choose-a-password"

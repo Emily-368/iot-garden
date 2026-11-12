@@ -141,6 +141,7 @@ awake.
 | Unplug both sensors | A sensor is drawing power while off (check VCC is on D3, not 3V3) |
 | Disconnect the battery divider | The divider (expected: about 10 µA for 200k + 200k) |
 | Unplug the antenna | Unlikely to change anything; if it does, re-seat the connector |
+| Set `BUTTON_FITTED = false` and upload | The service button's pull-up, which stays powered during sleep (expected: a few µA at most) |
 
 - Around 100 to 500 µA with everything removed: something on the board is still
   powered. Note the value and compare it with Seeed's figure of about 15 µA.

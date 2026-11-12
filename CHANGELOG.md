@@ -2,6 +2,27 @@
 
 Bugs fixed and improvements made, with the reasoning behind each one.
 
+## 12 November 2026: ESP32 service button
+
+Added an optional push button to the ESP32 sketch (`BUTTON_FITTED` and
+`BUTTON_GPIO` in `calibration.h`), wired between the MTCK pad (GPIO6) and GND.
+
+- **Short press: troubleshooting mode.** Wakes the board from deep sleep and
+  keeps it awake with Wi-Fi connected in modem sleep, sending a reading every
+  10 seconds and logging to USB serial. Reason: in deep sleep the board can't
+  be reached or watched, which made faults hard to diagnose.
+- **Hold 3 seconds: update mode.** Wi-Fi at full power with wireless (OTA)
+  upload from Arduino IDE. Needs `OTA_PASSWORD` in `secrets.h`. Reason: avoids
+  the BOOT/RESET routine and opening the housing to upload.
+- Both modes end after `SERVICE_TIMEOUT_S` (10 minutes) or another press, and
+  are refused when the battery is critical, to protect the battery.
+- The button is on GPIO6 because only GPIO 0 to 7 can wake this chip from deep
+  sleep, and D0 to D2 are taken by the battery divider and sensors.
+
+Checked: compiled with the real ESP32 core (3.3.12), with and without
+`OTA_PASSWORD`. **Not yet run on the board**, and the sleep current with the
+button's pull-up kept on has not been measured.
+
 ## 11 November 2026: code review and ESP32 battery work
 
 A review of the whole project: the Pi bridge, the web dashboard, `update.sh`,

@@ -35,17 +35,48 @@
     Sensor calibration and timing are in calibration.h.
 
   Keep BENCH_MODE true while testing. In deep sleep the USB port disappears, so
-  to upload afterwards: hold BOOT, tap RESET, release BOOT, then upload.
+  to upload afterwards: hold BOOT, tap RESET, release BOOT, then upload. Or use
+  the service button below.
+
+  Service button (optional, BUTTON_FITTED in calibration.h)
+    Wiring: one leg to the MTCK pad on the back of the board (GPIO6), the
+    other leg to GND. No resistor needed.
+
+    Short press      Troubleshooting mode. The board wakes and stays awake with
+                     Wi-Fi connected in modem sleep (the radio naps between
+                     router beacons). It sends a reading every 10 seconds, and
+                     prints details on USB serial at 115200 baud. The LED
+                     blinks slowly.
+    Hold 3 seconds   Update mode. Hold until the LED stays on, then let go.
+                     Wi-Fi runs at full power and the board appears in Arduino
+                     IDE under Tools > Port as "iot-garden-esp32", ready for a
+                     wireless (OTA) upload. The LED blinks quickly. Needs
+                     OTA_PASSWORD set in secrets.h.
+    Press again      Leaves either mode and goes back to sleep.
+
+    Both modes end on their own after SERVICE_TIMEOUT_S (10 minutes), so a
+    forgotten board doesn't flatten the battery.
 */
 
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
 #include <math.h>
 #include <string.h>
 #include "calibration.h"
 #include "secrets.h"
+#ifdef OTA_PASSWORD
+#include <ArduinoOTA.h>
+static_assert(sizeof(OTA_PASSWORD) > 1, "OTA_PASSWORD in secrets.h must not be empty");
+#endif
+
+// Only GPIO 0 to 7 can wake this chip from deep sleep. 1 and 2 are the sensors.
+static_assert(BUTTON_GPIO == 0 || (BUTTON_GPIO >= 4 && BUTTON_GPIO <= 7),
+              "BUTTON_GPIO must be 0 (D0), or 4 to 7 (pads on the back)");
+static_assert(!(BUTTON_FITTED && BATTERY_DIVIDER_FITTED && BUTTON_GPIO == 0),
+              "D0 is used by the battery divider: move the button to the MTCK pad (BUTTON_GPIO = 6)");
 
 // ---------------- Pins ----------------
 const int batteryPin     = D0;  // battery voltage divider
@@ -61,6 +92,9 @@ const int antennaSelectPin  = 14;  // LOW = built-in antenna, HIGH = U.FL antenn
 const char* MQTT_TOPIC     = "garden/esp32/reading";
 const char* MQTT_CLIENT_ID = "iot-garden-esp32";
 
+// Name shown in Arduino IDE under Tools > Port while in update mode
+const char* OTA_HOSTNAME   = "iot-garden-esp32";
+
 // ---------------- Settings ----------------
 const int NUM_SAMPLES = 10;                        // readings averaged per update
 const unsigned long SENSOR_SETTLE_MS     = 100;    // wait after powering the sensors
@@ -68,6 +102,7 @@ const unsigned long WIFI_FAST_TIMEOUT_MS = 4000;   // reconnecting to the rememb
 const unsigned long WIFI_TIMEOUT_MS      = 10000;  // full scan and connect
 const unsigned long MQTT_TIMEOUT_MS      = 4000;
 const unsigned long MQTT_FLUSH_MS        = 100;    // lets the message leave before Wi-Fi stops
+const unsigned long LONG_PRESS_MS        = 3000;   // hold the button this long for update mode
 
 // After this many failed cycles in a row, each sleep doubles (up to 8x, and
 // never more than MAX_SLEEP_S), so an unreachable router doesn't drain the battery.
@@ -95,13 +130,35 @@ struct Reading {
   int batteryMv;   // -1 when no divider is fitted
 };
 
+// What the board is doing. The service button switches between these.
+enum Mode { MODE_NORMAL, MODE_TROUBLESHOOT, MODE_UPDATE };
+enum Press { PRESS_NONE, PRESS_SHORT, PRESS_LONG };
+
+Mode mode = MODE_NORMAL;
+bool serialOn = false;                // USB serial started
+bool usedServiceMode = false;         // this wake included a service mode
+bool updateRunning = false;           // a wireless upload is in progress
+unsigned long modeStartMs = 0;
+unsigned long lastServiceReadingMs = 0;
+
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
 // ---------------- Helpers ----------------
 
 void logLine(const char* message) {
-  if (BENCH_MODE) Serial.println(message);
+  if (serialOn) Serial.println(message);
+}
+
+void startSerial() {
+  if (serialOn) return;
+  Serial.begin(115200);
+  serialOn = true;
+}
+
+// The orange LED next to the USB port. It lights when the pin is LOW.
+void setLed(bool on) {
+  digitalWrite(LED_BUILTIN, on ? LOW : HIGH);
 }
 
 // Pick the antenna set in calibration.h. Must run before Wi-Fi starts.
@@ -174,6 +231,18 @@ int batteryPercent(int batteryMv) {
   return 100;
 }
 
+// Battery voltage in millivolts, or -1 when no divider is fitted
+int readBatteryMv() {
+  if (!BATTERY_DIVIDER_FITTED) return -1;
+  return readAverageMv(batteryPin) * BATTERY_DIVIDER_RATIO;
+}
+
+// A nearly empty battery sags under Wi-Fi load and the board can restart
+// over and over, so the radio stays off until it is recharged.
+bool batteryCritical(int batteryMv) {
+  return batteryMv > BATTERY_PRESENT_MV && batteryMv < BATTERY_CRITICAL_MV;
+}
+
 // Short code sent to the Pi
 const char* waterCode(int state) {
   if (state == WATER_NEEDED)  return "dry";
@@ -197,10 +266,7 @@ Reading readSensors() {
   r.moisturePct = moisturePercentFromMv(r.moistureRaw);
   r.waterState  = waterState(r.moisturePct);
 
-  r.batteryMv = -1;
-  if (BATTERY_DIVIDER_FITTED) {
-    r.batteryMv = readAverageMv(batteryPin) * BATTERY_DIVIDER_RATIO;
-  }
+  r.batteryMv = readBatteryMv();
   return r;
 }
 
@@ -298,9 +364,7 @@ unsigned long runCycle() {
   Reading r = readSensors();
   char payload[320];
 
-  // A nearly empty battery sags under Wi-Fi load and the board can restart
-  // over and over, so leave the radio off and wait for a recharge.
-  if (r.batteryMv >= 0 && r.batteryMv > BATTERY_PRESENT_MV && r.batteryMv < BATTERY_CRITICAL_MV) {
+  if (batteryCritical(r.batteryMv)) {
     formatPayload(payload, sizeof(payload), r, 0);
     logLine(payload);
     logLine("Battery critical: skipping Wi-Fi");
@@ -346,9 +410,205 @@ void deepSleep(unsigned long seconds) {
   gpio_hold_en((gpio_num_t)rfSwitchEnablePin);
   gpio_hold_en((gpio_num_t)sensorPowerPin);
 
-  lastAwakeMs = millis();
+  // Let the service button wake the board. Its pull-up has to stay powered
+  // during sleep, or the pin would float and wake the board at random.
+  if (BUTTON_FITTED) {
+    while (buttonDown()) delay(10);   // a held button would wake it straight away
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+    rtc_gpio_pullup_en((gpio_num_t)BUTTON_GPIO);
+    rtc_gpio_pulldown_dis((gpio_num_t)BUTTON_GPIO);
+    esp_sleep_enable_ext1_wakeup_io(1ULL << BUTTON_GPIO, ESP_EXT1_WAKEUP_ANY_LOW);
+  }
+
+  setLed(false);
+  // Time spent in a service mode would spoil the battery figures
+  lastAwakeMs = usedServiceMode ? 0 : millis();
   esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
   esp_deep_sleep_start();
+}
+
+// ---------------- Service button ----------------
+
+bool buttonDown() {
+  return BUTTON_FITTED && digitalRead(BUTTON_GPIO) == LOW;
+}
+
+// Time a press that has already started. Returns once the button is released.
+Press timePress() {
+  unsigned long start = millis();
+  while (buttonDown()) {
+    if (millis() - start >= LONG_PRESS_MS) {
+      setLed(true);                     // LED on: held long enough, let go now
+      while (buttonDown()) delay(10);
+      delay(50);
+      return PRESS_LONG;
+    }
+    delay(10);
+  }
+  delay(50);                            // ignore contact bounce on release
+  return PRESS_SHORT;
+}
+
+Press checkButton() {
+  if (!buttonDown()) return PRESS_NONE;
+  delay(30);                            // ignore glitches shorter than this
+  if (!buttonDown()) return PRESS_NONE;
+  return timePress();
+}
+
+void printWifiDetails() {
+  if (!serialOn) return;
+  Serial.print("Wi-Fi: address ");
+  Serial.print(WiFi.localIP());
+  Serial.print(", signal ");
+  Serial.print(WiFi.RSSI());
+  Serial.print(" dBm, channel ");
+  Serial.println(WiFi.channel());
+}
+
+#ifdef OTA_PASSWORD
+void startUpdateServer() {
+  ArduinoOTA.setHostname(OTA_HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() {
+    updateRunning = true;
+    logLine("Update starting");
+  });
+  ArduinoOTA.onEnd([]() {
+    logLine("Update finished, restarting");
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    updateRunning = false;
+    modeStartMs = millis();             // allow a full timeout for another try
+    logLine("Update failed. Try the upload again.");
+  });
+  ArduinoOTA.begin();
+}
+#endif
+
+// Switch to troubleshooting or update mode. Both keep the board awake.
+void enterMode(Mode next) {
+  startSerial();
+  usedServiceMode = true;
+
+#ifndef OTA_PASSWORD
+  if (next == MODE_UPDATE) {
+    logLine("Update mode needs OTA_PASSWORD in secrets.h. Using troubleshooting mode.");
+    next = MODE_TROUBLESHOOT;
+  }
+#endif
+
+  // Update mode runs the processor at full speed, and that has to be set
+  // while Wi-Fi is off.
+  stopWifi();
+  setCpuFrequencyMhz(next == MODE_UPDATE ? 160 : 80);
+
+  mode = next;
+  modeStartMs = millis();
+  lastServiceReadingMs = 0;
+
+  if (!connectWifi()) {
+    logLine("Wi-Fi connection failed. Will keep trying.");
+  }
+
+  if (mode == MODE_UPDATE) {
+    WiFi.setSleep(false);               // radio fully on, for a fast upload
+#ifdef OTA_PASSWORD
+    startUpdateServer();
+#endif
+    logLine("Update mode: in Arduino IDE choose Tools > Port > iot-garden-esp32, then upload.");
+  } else {
+    WiFi.setSleep(true);                // modem sleep: radio naps between router beacons
+    logLine("Troubleshooting mode: awake, sending a reading every 10 seconds.");
+    logLine("Hold the button 3 seconds for update mode, or press it to sleep.");
+  }
+  printWifiDetails();
+}
+
+// Leave a service mode. On battery this goes back to deep sleep.
+void leaveServiceMode(const char* reason) {
+  logLine(reason);
+#ifdef OTA_PASSWORD
+  if (mode == MODE_UPDATE) ArduinoOTA.end();
+#endif
+  stopWifi();
+  setCpuFrequencyMhz(80);
+  setLed(false);
+  mode = MODE_NORMAL;
+
+  if (!BENCH_MODE) {
+    logLine("Going back to sleep");
+    Serial.flush();
+    deepSleep(SLEEP_INTERVAL_S);
+  }
+}
+
+// One pass of troubleshooting or update mode. Called over and over from loop().
+void serviceLoop() {
+  unsigned long now = millis();
+
+  // LED: slow blink = troubleshooting, fast blink = update
+  unsigned long blinkMs = (mode == MODE_UPDATE) ? 150 : 1000;
+  setLed((now / blinkMs) % 2 == 0);
+
+  if (!updateRunning) {
+    Press press = checkButton();
+    if (press == PRESS_LONG && mode != MODE_UPDATE) {
+      enterMode(MODE_UPDATE);
+      return;
+    }
+    if (press != PRESS_NONE) {
+      leaveServiceMode("Button pressed: leaving service mode");
+      return;
+    }
+    if (now - modeStartMs >= SERVICE_TIMEOUT_S * 1000UL) {
+      leaveServiceMode("Service mode timed out");
+      return;
+    }
+  }
+
+  if (mode == MODE_UPDATE) {
+#ifdef OTA_PASSWORD
+    ArduinoOTA.handle();
+#endif
+    delay(2);
+    return;
+  }
+
+  // Troubleshooting: Wi-Fi stays connected, with a reading every few seconds
+  if (lastServiceReadingMs == 0 || now - lastServiceReadingMs >= BENCH_INTERVAL_S * 1000UL) {
+    lastServiceReadingMs = now;
+
+    if (WiFi.status() != WL_CONNECTED) {
+      logLine("Wi-Fi not connected, retrying");
+      stopWifi();
+      if (connectWifi()) WiFi.setSleep(true);
+    }
+
+    Reading r = readSensors();
+    char payload[320];
+    bool connected = WiFi.status() == WL_CONNECTED;
+    formatPayload(payload, sizeof(payload), r, connected ? WiFi.RSSI() : 0);
+    logLine(payload);
+    if (connected) {
+      logLine(publishReading(payload) ? "Published" : "MQTT publish failed");
+      printWifiDetails();
+    }
+  }
+  delay(10);
+}
+
+// Wait between readings in BENCH_MODE, watching the button
+void benchWait() {
+  unsigned long start = millis();
+  while (millis() - start < BENCH_INTERVAL_S * 1000UL) {
+    Press press = checkButton();
+    if (press != PRESS_NONE) {
+      enterMode(press == PRESS_LONG ? MODE_UPDATE : MODE_TROUBLESHOOT);
+      return;
+    }
+    delay(10);
+  }
 }
 
 // ---------------- Main ----------------
@@ -356,7 +616,7 @@ void deepSleep(unsigned long seconds) {
 void setup() {
   setCpuFrequencyMhz(80);   // the slowest speed Wi-Fi allows; lowers current while awake
 
-  if (BENCH_MODE) Serial.begin(115200);
+  if (BENCH_MODE) startSerial();
 
   // Release the pins that were held during deep sleep
   gpio_hold_dis((gpio_num_t)rfSwitchEnablePin);
@@ -368,14 +628,39 @@ void setup() {
   analogReadResolution(12);
   selectAntenna();
   logLine(USE_EXTERNAL_ANTENNA ? "Antenna: external (U.FL socket)" : "Antenna: built-in");
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  setLed(false);
+
+  // Service button: did it wake the board, or is it held down at power-on?
+  if (BUTTON_FITTED) {
+    bool wokeByButton = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
+    rtc_gpio_deinit((gpio_num_t)BUTTON_GPIO);   // hand the pin back after sleep
+    pinMode(BUTTON_GPIO, INPUT_PULLUP);
+    delay(5);
+
+    if (wokeByButton || buttonDown()) {
+      Press press = timePress();
+      if (batteryCritical(readBatteryMv())) {
+        logLine("Battery critical: service modes are off until it is recharged");
+      } else {
+        enterMode(press == PRESS_LONG ? MODE_UPDATE : MODE_TROUBLESHOOT);
+      }
+    }
+  }
 }
 
 void loop() {
+  if (mode != MODE_NORMAL) {
+    serviceLoop();
+    return;
+  }
+
   unsigned long sleepS = runCycle();
 
   if (BENCH_MODE) {
     lastAwakeMs = 0;   // not meaningful while the board never sleeps
-    delay(BENCH_INTERVAL_S * 1000UL);
+    benchWait();
   } else {
     deepSleep(sleepS);
   }
